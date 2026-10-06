@@ -1,0 +1,26 @@
+{
+  "name": "@browsagent/style-resolver",
+  "version": "0.0.0",
+  "description": "Phase 2: find the CSS rules that hit an element. Use the CDP.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@browsagent/shared": "workspace:*",
+    "playwright-core": "^1.48.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
