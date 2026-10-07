@@ -98,7 +98,7 @@ moved too far from the recorded commit. Read `docs/CONTEXT.md`.
 - the winning style rule and the losing rules,
 - the parent chain,
 - the use sites,
-- the screen width of the mark,
+- the address of the page at the time of the mark,
 - the state at the time of the mark,
 - the confidence value.
 
@@ -149,8 +149,14 @@ messages and one different task.
 - The context is stale. Then the tool asks the user. It does not use the context
   without a report.
 
-### Not in this phase
+### What the check is
 
-The picture check is dropped. There is no screenshot step and no comparison of
-screen widths. The remaining checks are the type check and the lint. Read
-`docs/REVIEW.md` for what that costs.
+The check is the type check and the lint. There is no screenshot step and no
+comparison at a screen width.
+
+**A type check and a lint cannot tell a correct repair from a wrong one.** Both
+pass for a wrong colour, a wrong width, and the right edit on the wrong
+element. The diff is the only evidence that the repair is correct. The user
+reads the diff.
+
+Read `docs/REVIEW.md` for the finding.

@@ -19,14 +19,12 @@ The compiler gives the expression. The runtime gives the result. You need both.
 Two agents must not change one file at one time. A worktree is a separate copy
 of the files. The merge step finds the conflict.
 
-## D5. Check with pixels — DROPPED
+## D5. No picture check
 
-The word "fixed" meant "correct in the pictures at each screen width". A text
-diff is not sufficient.
+There is no screenshot step and no comparison at a screen width. The word
+"fixed" means "the type check and the lint pass, and the diff is small".
 
-**This decision is dropped.** The screenshot step is removed by decision. No
-replacement exists. The remaining checks are the type check and the lint, and
-both return `true` when the option is absent. Read `docs/REVIEW.md`.
+A repair is not measured by a picture. **A repair is measured by the diff.**
 
 ## D6. Development only
 
@@ -43,6 +41,13 @@ the same knowledge. Read `docs/CONTEXT.md`.
 The API key, the API base, and the model come from the user. The key lives in
 the companion, not in the browser. The extension storage is readable by a
 content script. The key is not needed in the page.
+
+The companion reads the values from the environment, then
+`~/.browsagent/config.json`, then the pi provider store at
+`~/.pi/agent/auth.json`. Read `docs/CONTEXT.md`.
+
+Two model slots: `model` for the repair and `modelCheap` for the context pass.
+Do not spend the strong model on the summary.
 
 ## Open questions
 

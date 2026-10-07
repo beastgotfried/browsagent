@@ -179,14 +179,11 @@ rendered node".
 
 ## Two decisions that void the design document
 
-### D5 — "Check with pixels" now has no carrier
+### D5 — there is no picture check
 
-`docs/DESIGN.md` D5 says: "The word 'fixed' means 'correct in the pictures at
-each screen width'. A text diff is not sufficient."
-
-The screenshot step is dropped by decision. **So D5 has no implementation and
-no replacement.** Finding 10 is what remains: a type check and a lint, and both
-default to pass. The desktop-to-mobile requirement has no carrier at all.
+There is no screenshot step by decision. **So the check has no carrier.**
+Finding 10 is what remains: a type check and a lint, and both default to pass.
+The desktop-to-mobile requirement has no carrier at all.
 
 ### D6 — "Development only" is not enforced
 

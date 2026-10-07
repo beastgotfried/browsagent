@@ -128,16 +128,61 @@ agent.
 
 ## The model provider
 
-The user gives three values. All three are optional.
+The user gives four values. All four are optional.
 
 | Value | Default |
 |---|---|
 | The API key | none. Without a key no agent runs |
 | The API base | `https://openrouter.ai/api/v1` |
-| The model | a DeepSeek model on OpenRouter |
+| The model | `~deepseek/deepseek-pro-latest` |
+| The cheap model | `~deepseek/deepseek-v4-flash-latest` |
 
 The base and the model come from the user, so the tool is not fixed to one
 provider.
+
+### Two model slots
+
+The context pass is a summary job. The repair is a coding job. **Do not spend
+the strong model on the summary.**
+
+| Slot | Model | Used by | Input | Output |
+|---|---|---|---|---|
+| `modelCheap` | `~deepseek/deepseek-v4-flash-latest` | the context pass | $0.018 / M | $1.28 / M |
+| `model` | `~deepseek/deepseek-pro-latest` | every repair | $0.19 / M | $5.00 / M |
+
+Both were tested against a live OpenRouter account:
+
+- a plain answer: works,
+- **a tool call: works,**
+- **a tool result fed back, then a second answer: works,**
+- JSON mode: works.
+
+So an agent can read a file, read the answer, and continue. The agent loop needs
+no framework.
+
+### The guardrail block
+
+On the tested account, **10 of 18 DeepSeek endpoints were refused** with
+"blocked by guardrail" and "data policy". The refused set holds every older
+DeepSeek chat model and `deepseek/deepseek-v4-pro`.
+
+The usable set was:
+
+```
+~deepseek/deepseek-flash-latest
+~deepseek/deepseek-v4-flash-latest
+~deepseek/deepseek-pro-latest
+deepseek/deepseek-v4-flash
+deepseek/deepseek-v4-flash-0731
+deepseek/deepseek-v4.1-flash
+deepseek/deepseek-v4-pro-0813
+```
+
+**This is a setting on the account, not a fault in the tool.** The user can
+change it at `openrouter.ai/settings/privacy`.
+
+So the tool must report a refused model in clear words. It must not report a
+network fault when the provider said "data policy".
 
 ### Where the key lives
 
@@ -146,22 +191,29 @@ provider.
 The extension storage is readable by a content script. The key is not needed in
 the page. The companion is a local Node process, so it holds the key.
 
-```
-~/.browsagent/config.json     the key, the base, and the model
-```
+The companion reads the four values in this order. The first source that gives
+a value wins.
 
-A file in the home directory is better than a file in the project, because a
-file in the project can reach the repository by accident.
+| Order | Source |
+|---|---|
+| 1 | the environment |
+| 2 | `~/.browsagent/config.json` |
+| 3 | `~/.pi/agent/auth.json`, the pi provider store |
 
-The environment can also give the three values:
+The third source is a convenience. A user of pi already keeps an OpenRouter key
+there, so the tool needs no setup on that machine.
 
 ```
 BROWSAGENT_API_KEY
 BROWSAGENT_API_BASE
 BROWSAGENT_MODEL
+BROWSAGENT_MODEL_CHEAP
 ```
 
-The environment wins over the file.
+The environment wins over both files.
+
+A file in the home directory is better than a file in the project, because a
+file in the project can reach the repository by accident.
 
 ### The report
 

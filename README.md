@@ -14,8 +14,8 @@ Point at one element. Write the problem. The tool does the rest:
 
 1. The tool finds the exact source position of the element.
 2. One agent makes the smallest repair in a separate worktree.
-3. The tool compares the pixels at each screen width.
-4. The panel shows the result. You agree or reject.
+3. The tool runs the type check and the lint.
+4. The panel shows the diff. You agree or reject.
 
 ## The three phases
 
