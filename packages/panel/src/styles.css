@@ -1,41 +1,14 @@
+/*
+ * The task list CSS. The extension side panel copies this file with the
+ * markup of renderTasks. See `src/index.ts`.
+ */
+
 :root {
   --bg: #0b0d12;
   --fg: #e8ecf3;
   --dim: #8b95a7;
   --line: #1e2430;
   --accent: #4f8cff;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
-}
-
-.panel {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 32px 20px;
-}
-
-.panel__head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.panel__head h1 {
-  font-size: 18px;
-  margin: 0;
-}
-
-.panel__count {
-  color: var(--dim);
 }
 
 .panel__list {
@@ -86,6 +59,18 @@ body {
   color: var(--fg);
 }
 
+.card__diff {
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.5 ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .badge {
   font-size: 11px;
   text-transform: uppercase;
@@ -110,19 +95,4 @@ body {
 .badge--rejected {
   border-color: #f85149;
   color: #f85149;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.dot--on {
-  background: #3fb950;
-}
-
-.dot--off {
-  background: #f85149;
 }

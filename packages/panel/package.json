@@ -1,24 +1,25 @@
 {
   "name": "@browsagent/panel",
   "version": "0.0.0",
-  "description": "The management panel. One card for each task.",
+  "description": "The task list view. The extension side panel copies the markup and the CSS.",
   "type": "module",
-  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@browsagent/shared": "workspace:*",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@browsagent/shared": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.3",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.0"
+    "typescript": "^5.6.3"
   }
 }
