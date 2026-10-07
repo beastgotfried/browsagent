@@ -14,7 +14,8 @@
     "dev": "pnpm --filter @browsagent/cli dev",
     "demo": "pnpm --filter demo-app dev",
     "prove": "node scripts/prove-e2e.mjs",
-    "demo:kitchen": "pnpm --filter kitchen-sink dev"
+    "demo:kitchen": "pnpm --filter kitchen-sink dev",
+    "browsagent": "node packages/cli/dist/index.js"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
