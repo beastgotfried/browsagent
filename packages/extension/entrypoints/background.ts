@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
-import type { ClientToServer } from '@browsagent/shared';
+import type { ClientToServer, Task } from '@browsagent/shared';
 
 import type { FromBackground, Selection, ToBackground } from '../src/bus.js';
 import {
@@ -10,6 +10,16 @@ import {
   QUEUED_MARKS_LIMIT,
   queuedMarksItem,
 } from '../src/config.js';
+
+/**
+ * The address of the companion for HTTP reads.
+ *
+ * The saved address starts with ws or wss. The `fetch` function needs http or
+ * https. A trailing slash must go.
+ */
+function httpBase(server: string): string {
+  return server.trim().replace(/\/+$/, '').replace(/^ws/, 'http');
+}
 
 /**
  * The background service worker.
@@ -77,6 +87,30 @@ export default defineBackground(() => {
     });
   };
 
+  /** Send one message when the socket is open. Return false when it is not. */
+  const sendNow = (message: ClientToServer): boolean => {
+    if (socket === null || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(message));
+    return true;
+  };
+
+  /**
+   * Read the task list from the companion.
+   *
+   * The socket carries the tasks of later marks only. This read gives the
+   * tasks that the companion already holds. Therefore a panel that opens after
+   * the connect shows every task.
+   */
+  const loadTasks = async (): Promise<void> => {
+    try {
+      const reply = await fetch(`${httpBase(server)}/tasks`);
+      if (!reply.ok) return;
+      toPanel({ kind: 'task-list', tasks: (await reply.json()) as Task[] });
+    } catch {
+      // The socket still carries the new tasks. A failed read is not fatal.
+    }
+  };
+
   const status = (): void => {
     toPanel({ kind: 'status', connected, server, queued: queue.length });
   };
@@ -138,6 +172,7 @@ export default defineBackground(() => {
         connected = true;
         backoff = 1000;
         void flushQueue(ws).catch(() => undefined);
+        void loadTasks();
       });
 
       ws.addEventListener('message', (event) => {
@@ -222,6 +257,9 @@ export default defineBackground(() => {
       void queueReady.then(() => {
         sendResponse({ kind: 'status', connected, server, queued: queue.length });
       });
+      // A panel can open after the socket connect. That panel missed the
+      // task-list message. Read the list again for this panel.
+      void loadTasks();
       return true;
     }
 
@@ -232,13 +270,47 @@ export default defineBackground(() => {
 
     if (typed.kind === 'selected') {
       const selection: Selection = typed.selection;
-      // The problem editor does not exist yet. Send a null problem. The
-      // companion answers with the record and makes no task.
+      // A click alone carries no problem. Send a null problem, so the
+      // companion answers with the record. The editor sends the problem later
+      // in a send-mark message.
       send({
         kind: 'mark',
         selection,
         problem: null,
       } satisfies ClientToServer);
+      return false;
+    }
+
+    if (typed.kind === 'send-mark') {
+      // The panel holds the problem text. The worker holds the socket. The
+      // queue keeps the mark when the socket is closed.
+      send({
+        kind: 'mark',
+        selection: typed.selection,
+        problem: typed.problem,
+      } satisfies ClientToServer);
+      return false;
+    }
+
+    if (typed.kind === 'accept') {
+      // An accept is a command, not a mark. Do not queue it. A late apply
+      // would change the tree at the wrong time.
+      if (!sendNow({ kind: 'accept', taskId: typed.taskId })) {
+        toPanel({
+          kind: 'error',
+          message: 'The companion is offline. The accept did not run.',
+        });
+      }
+      return false;
+    }
+
+    if (typed.kind === 'recontext') {
+      if (!sendNow({ kind: 'recontext' })) {
+        toPanel({
+          kind: 'error',
+          message: 'The companion is offline. The context pass did not run.',
+        });
+      }
       return false;
     }
 

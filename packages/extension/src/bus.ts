@@ -1,8 +1,11 @@
 import type {
+  AcceptResult,
   ElementRecord,
   Problem,
+  ProjectContext,
   Selection,
   SourcePosition,
+  Task,
 } from '@browsagent/shared';
 
 // The mark shape is part of the wire protocol. The extension and the
@@ -16,6 +19,10 @@ export type ToBackground =
   // The panel sends the mark. The worker holds the socket. The panel holds
   // the problem text.
   | { kind: 'send-mark'; selection: Selection; problem: Problem }
+  // The panel asks the worker to apply the patch of one task.
+  | { kind: 'accept'; taskId: string }
+  // The panel asks the worker for a new context pass.
+  | { kind: 'recontext' }
   | { kind: 'error'; message: string }
   | { kind: 'status' }
   | { kind: 'overlay-state'; active: boolean };
@@ -33,7 +40,16 @@ export type FromBackground =
   | { kind: 'status'; connected: boolean; server: string; queued: number }
   | { kind: 'selected'; selection: Selection }
   | { kind: 'record'; record: ElementRecord }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  // The task of one mark. The companion makes it. The panel shows it.
+  | { kind: 'task'; task: Task }
+  // The tasks that the companion already holds. The worker reads them with
+  // GET /tasks when the socket connects or the panel opens.
+  | { kind: 'task-list'; tasks: Task[] }
+  // The answer of the accept step. The tool applied the patch.
+  | { kind: 'accepted'; result: AcceptResult; task: Task }
+  // The project context. Null before the first context pass.
+  | { kind: 'context'; context: ProjectContext | null; stale: boolean };
 
 /**
  * The page bridge protocol.

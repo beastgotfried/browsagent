@@ -1,5 +1,11 @@
-import { PROBLEM_TYPES } from '@browsagent/shared';
-import type { ElementRecord, Problem, ProblemType } from '@browsagent/shared';
+import {
+  PROBLEM_TYPES,
+  type AcceptResult,
+  type ElementRecord,
+  type Problem,
+  type ProblemType,
+  type Task,
+} from '@browsagent/shared';
 import { browser } from 'wxt/browser';
 
 import type { FromBackground, Selection, ToBackground } from '../../src/bus.js';
@@ -11,9 +17,17 @@ const typeSelect = document.getElementById('problem-type');
 const textArea = document.getElementById('problem-text');
 const sendButton = document.getElementById('problem-send');
 const answer = document.getElementById('answer');
+const taskList = document.getElementById('task-list');
+const acceptAnswer = document.getElementById('accept-answer');
 
 /** The last selection. The form sends this value with the problem. */
 let lastSelection: Selection | null = null;
+
+/** The tasks of the companion. The list read and the task messages fill it. */
+let tasks: Task[] = [];
+
+/** The identities of the applied tasks. The accept button of one card goes dark. */
+const applied = new Set<string>();
 
 function paint(connected: boolean, server: string, queued: number): void {
   if (state === null) return;
@@ -25,12 +39,7 @@ function paint(connected: boolean, server: string, queued: number): void {
 /** Fill the select from the shared list. The list lives in one place. */
 function fillTypes(): void {
   if (!(typeSelect instanceof HTMLSelectElement)) return;
-  for (const type of PROBLEM_TYPES) {
-    const option = document.createElement('option');
-    option.value = type;
-    option.textContent = type;
-    typeSelect.append(option);
-  }
+  for (const type of PROBLEM_TYPES) typeSelect.append(new Option(type, type));
   typeSelect.value = 'layout';
 }
 
@@ -46,52 +55,30 @@ function say(message: string): void {
   answer.textContent = message;
 }
 
-/**
- * Show the record that the content script read.
- *
- * This answer is immediate. It comes from the page and needs no companion.
- */
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  text: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  return node;
+}
+
+function showJson(from: string, body: unknown): void {
+  if (record === null) return;
+  record.textContent = JSON.stringify({ from, body }, null, 2);
+}
+
+/** Show the selection from the page. This answer needs no companion. */
 function show(selection: Selection): void {
   lastSelection = selection;
   updateButton();
-  if (record === null) return;
-  record.textContent = JSON.stringify(
-    {
-      from: 'the page',
-      source: `${selection.stamp.src.file}:${selection.stamp.src.line}`,
-      component: selection.stamp.component,
-      expressions: selection.stamp.expressions,
-      values: selection.record.values,
-      editable: selection.stamp.editable,
-      viewport: selection.record.viewport,
-    },
-    null,
-    2,
-  );
+  showJson('the page', selection);
 }
 
-/**
- * Show the record that the companion sent back.
- *
- * The companion joins the static side and the live side. It adds the style
- * rules and the use sites. The confidence value tells the user how much the
- * tool trusts the source position.
- */
+/** Show the full record. The companion joins the stamp and the live record. */
 function showRecord(full: ElementRecord): void {
-  if (record === null) return;
-  record.textContent = JSON.stringify(
-    {
-      from: 'the companion',
-      source: `${full.src.file}:${full.src.line}:${full.src.column}`,
-      component: full.component,
-      confidence: full.confidence,
-      editable: full.editable,
-      styleRules: full.styles.length,
-      useSites: full.useSites.map((site) => `${site.file}:${site.line}`),
-    },
-    null,
-    2,
-  );
+  showJson('the companion', full);
 }
 
 function showError(message: string): void {
@@ -101,12 +88,7 @@ function showError(message: string): void {
   state.title = '';
 }
 
-/**
- * Send the mark with the problem to the worker.
- *
- * The worker holds the socket to the companion. The panel holds the problem
- * text. Therefore the panel sends the whole mark.
- */
+/** Send the mark with the problem. The worker holds the socket. */
 function sendMark(event: SubmitEvent): void {
   event.preventDefault();
   const selection = lastSelection;
@@ -133,6 +115,57 @@ function sendMark(event: SubmitEvent): void {
     .catch(() => say('The worker did not answer.'));
 }
 
+/** Ask the worker to apply the patch of one task. */
+function acceptTask(taskId: string): void {
+  if (acceptAnswer !== null) acceptAnswer.textContent = 'The tool applies the patch...';
+  void browser.runtime
+    .sendMessage({ kind: 'accept', taskId } satisfies ToBackground)
+    .catch(() => undefined);
+}
+
+/** Put one task in the array. The changed task goes at the start. */
+function putTask(task: Task): void {
+  tasks = [task, ...tasks.filter((item) => item.id !== task.id)];
+  render();
+}
+
+/** Show the answer of the accept step. The applied task keeps a dark button. */
+function showAccepted(result: AcceptResult, task: Task): void {
+  if (result.applied) applied.add(task.id);
+  putTask(task);
+  if (acceptAnswer !== null) acceptAnswer.textContent = result.message;
+}
+
+/** Make one card: the source, the problem, the state, the diff, and the button. */
+function card(task: Task): HTMLLIElement {
+  const item = document.createElement('li');
+
+  const label = el('span', task.state);
+  label.className = 'pill';
+  const head = el('p', `${task.record.src.file}:${task.record.src.line}`);
+  head.prepend(label);
+  item.append(head);
+
+  item.append(el('p', `${task.problem.type}: ${task.problem.text}`));
+
+  const diffText = task.diff ?? '';
+  if (diffText.trim() !== '') item.append(el('pre', diffText));
+
+  const accept = el('button', 'Accept the repair');
+  accept.type = 'button';
+  // No diff or an applied task gives the button nothing to do.
+  accept.disabled = diffText.trim() === '' || applied.has(task.id);
+  accept.addEventListener('click', () => acceptTask(task.id));
+  item.append(accept);
+
+  return item;
+}
+
+function render(): void {
+  if (taskList === null) return;
+  taskList.replaceChildren(...tasks.map(card));
+}
+
 function ask(): void {
   void browser.runtime
     .sendMessage({ kind: 'status' } satisfies ToBackground)
@@ -149,13 +182,17 @@ browser.runtime.onMessage.addListener((message: unknown) => {
   if (typed.kind === 'selected') show(typed.selection);
   if (typed.kind === 'record') showRecord(typed.record);
   if (typed.kind === 'error') showError(typed.message);
+  if (typed.kind === 'task') putTask(typed.task);
+  if (typed.kind === 'task-list') {
+    tasks = typed.tasks;
+    render();
+  }
+  if (typed.kind === 'accepted') showAccepted(typed.result, typed.task);
 });
 
 fillTypes();
 if (form instanceof HTMLFormElement) form.addEventListener('submit', sendMark);
-if (textArea instanceof HTMLTextAreaElement) {
-  textArea.addEventListener('input', updateButton);
-}
+if (textArea instanceof HTMLTextAreaElement) textArea.addEventListener('input', updateButton);
 updateButton();
 
 ask();
