@@ -103,11 +103,30 @@ export interface ElementRecord {
 
 export type ProblemType =
   | 'layout'
-  | 'style'
+  | 'spacing'
+  | 'color'
+  | 'type'
   | 'content'
+  | 'behaviour'
   | 'access'
-  | 'behavior'
-  | 'speed';
+  | 'speed'
+  | 'other';
+
+/**
+ * The list of every problem type. The problem editor reads this list.
+ * The editor must not write the list again.
+ */
+export const PROBLEM_TYPES: readonly ProblemType[] = [
+  'layout',
+  'spacing',
+  'color',
+  'type',
+  'content',
+  'behaviour',
+  'access',
+  'speed',
+  'other',
+];
 
 export type Severity = 'low' | 'medium' | 'high';
 
@@ -185,4 +204,87 @@ export interface Selection {
   record: RuntimeRecord;
   /** The address of the page at the time of the mark. */
   tabUrl: string;
+}
+
+/** The role of one message in a model call. */
+export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+
+/** One tool call from the model. */
+export interface ToolCall {
+  /** The identity of the call. The tool result joins this value. */
+  id: string;
+  name: string;
+  /** The arguments as a JSON string. */
+  arguments: string;
+}
+
+/** One tool that the model can call. */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  /** The JSON Schema of the arguments. */
+  parameters: Record<string, unknown>;
+}
+
+/** One message in a model call. */
+export interface ChatMessage {
+  role: ChatRole;
+  /** Null when the assistant message only calls a tool. */
+  content: string | null;
+  /** Only on an assistant message that calls a tool. */
+  toolCalls?: ToolCall[];
+  /** Only on a tool message. It joins the answer to the call. */
+  toolCallId?: string;
+  /** The name of the tool or the function. */
+  name?: string;
+}
+
+/** The token count of one model call. */
+export interface ChatUsage {
+  input: number;
+  output: number;
+}
+
+/** The answer of one model call. */
+export interface ChatResult {
+  /** The words of the answer. Null when the model only calls a tool. */
+  content: string | null;
+  /** The tool calls. Empty when the model only gives words. */
+  toolCalls: ToolCall[];
+  usage: ChatUsage;
+}
+
+/**
+ * The provider values of the companion.
+ * The key stays in the companion and never goes to the browser.
+ */
+export interface ProviderConfig {
+  /** The key. Null when no source holds a key. */
+  apiKey: string | null;
+  apiBase: string;
+  model: string;
+  modelCheap: string;
+}
+
+/** The project context. One model call makes this document at the project init. */
+export interface ProjectContext {
+  markdown: string;
+  /** The commit at the time of the context pass. */
+  commit: string;
+  /** The model that made the context. */
+  model: string;
+  /** The token count of the document. */
+  tokens: number;
+  /** The time of the context pass. */
+  madeAt: string;
+}
+
+/** The result of the accept step. The tool applies the patch to the working tree. */
+export interface AcceptResult {
+  /** True when the patch is in the working tree. */
+  applied: boolean;
+  /** The files of the patch. */
+  files: string[];
+  /** The words for the user. */
+  message: string;
 }

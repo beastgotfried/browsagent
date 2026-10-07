@@ -1,6 +1,8 @@
 import type {
+  AcceptResult,
   ElementRecord,
   Problem,
+  ProjectContext,
   RuntimeRecord,
   Selection,
   StaticStamp,
@@ -38,6 +40,16 @@ export type ClientToServer =
       kind: 'mark';
       selection: Selection;
       problem: Problem | null;
+    }
+  | {
+      /** The user accepts the diff of one task. The tool applies the patch. */
+      kind: 'accept';
+      /** The identity of the task. */
+      taskId: string;
+    }
+  | {
+      /** The user asks for a new context pass. */
+      kind: 'recontext';
     };
 
 /** The messages from the server to the client. */
@@ -45,7 +57,20 @@ export type ServerToClient =
   | { kind: 'indexed'; count: number }
   | { kind: 'record'; record: ElementRecord }
   | { kind: 'task'; task: Task }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  | {
+      /** The project context. Null before the first context pass. */
+      kind: 'context';
+      context: ProjectContext | null;
+      /** True when the context commit is not the current commit. */
+      stale: boolean;
+    }
+  | {
+      /** The tool applied the patch of one task to the working tree. */
+      kind: 'accepted';
+      result: AcceptResult;
+      task: Task;
+    };
 
 /** The name of the stamp attributes. The plugin and the client share them. */
 export const STAMP = {

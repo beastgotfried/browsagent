@@ -1,11 +1,18 @@
 export type {
+  AcceptResult,
+  ChatMessage,
+  ChatResult,
+  ChatRole,
+  ChatUsage,
   Confidence,
   ElementRecord,
   ElementState,
   Evidence,
   Problem,
   ProblemType,
+  ProjectContext,
   PropagateMode,
+  ProviderConfig,
   RuntimeRecord,
   Selection,
   Severity,
@@ -14,8 +21,12 @@ export type {
   StyleRule,
   Task,
   TaskState,
+  ToolCall,
+  ToolSpec,
   Viewport,
 } from './types.js';
+
+export { PROBLEM_TYPES } from './types.js';
 
 export type { ClientToServer, ServerToClient } from './protocol.js';
 
