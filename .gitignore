@@ -8,3 +8,8 @@ dist/
 .worktrees/
 .DS_Store
 *.log
+
+# WXT build output
+.output/
+.wxt/
+stats.html

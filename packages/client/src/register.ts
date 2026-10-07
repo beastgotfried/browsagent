@@ -2,6 +2,7 @@ import {
   STAMP,
   type ElementState,
   type RuntimeRecord,
+  type SourcePosition,
   type StaticStamp,
   type Viewport,
 } from '@browsagent/shared';
@@ -31,11 +32,19 @@ export function readState(node: Element): ElementState {
 
 /** Read the size of the browser. */
 export function readViewport(): Viewport {
-  return {
-    name: 'current',
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
+  return { name: 'current', width: window.innerWidth, height: window.innerHeight };
+}
+
+/** Read one source position from a stamp value. */
+function parsePosition(value: string | null): SourcePosition | null {
+  if (!value) return null;
+  const parts = value.split(':');
+  if (parts.length < 3) return null;
+  const column = Number(parts[parts.length - 1]);
+  const line = Number(parts[parts.length - 2]);
+  const file = parts.slice(0, -2).join(':');
+  if (Number.isNaN(line) || Number.isNaN(column)) return null;
+  return { file, line, column };
 }
 
 function readExpressions(node: Element): Record<string, string> {
@@ -52,20 +61,8 @@ function readExpressions(node: Element): Record<string, string> {
   return {};
 }
 
-function parsePosition(value: string | null): { file: string; line: number; column: number } | null {
-  if (!value) return null;
-  const parts = value.split(':');
-  if (parts.length < 3) return null;
-  const column = Number(parts[parts.length - 1]);
-  const line = Number(parts[parts.length - 2]);
-  const file = parts.slice(0, -2).join(':');
-  if (Number.isNaN(line) || Number.isNaN(column)) return null;
-  return { file, line, column };
-}
-
 function componentName(node: Element): string | null {
-  const value = node.closest('[data-component]');
-  return value?.getAttribute('data-component') ?? null;
+  return node.closest('[data-component]')?.getAttribute('data-component') ?? null;
 }
 
 /** Read the evaluated value of one node. */
@@ -78,24 +75,37 @@ function readValues(node: Element): Record<string, string> {
   return values;
 }
 
+/** Read the static data of one node. Null if the node has no stamp. */
+export function readStamp(node: Element): StaticStamp | null {
+  const src = parsePosition(node.getAttribute(STAMP.src));
+  if (!src) return null;
+  const parentElement = node.parentElement;
+  return {
+    src,
+    component: componentName(node),
+    expressions: readExpressions(node),
+    editable: !src.file.includes('node_modules'),
+    parentSrc: parentElement ? parsePosition(parentElement.getAttribute(STAMP.src)) : null,
+    inst: instanceId(node),
+  };
+}
+
+/** Read the live data of one node. */
+export function readRecord(node: Element): RuntimeRecord {
+  return {
+    inst: instanceId(node),
+    values: readValues(node),
+    state: readState(node),
+    viewport: readViewport(),
+  };
+}
+
 /** Collect the static data of every node with a stamp. */
 export function collectStamps(root: ParentNode): StaticStamp[] {
   const stamps: StaticStamp[] = [];
   for (const node of root.querySelectorAll(`[${STAMP.src}]`)) {
-    const src = parsePosition(node.getAttribute(STAMP.src));
-    if (!src) continue;
-    const parentElement = node.parentElement;
-    const parentSrc = parentElement
-      ? parsePosition(parentElement.getAttribute(STAMP.src))
-      : null;
-    stamps.push({
-      src,
-      component: componentName(node),
-      expressions: readExpressions(node),
-      editable: !src.file.includes('node_modules'),
-      parentSrc,
-      inst: instanceId(node),
-    });
+    const stamp = readStamp(node);
+    if (stamp) stamps.push(stamp);
   }
   return stamps;
 }
@@ -104,12 +114,7 @@ export function collectStamps(root: ParentNode): StaticStamp[] {
 export function collectRecords(root: ParentNode): RuntimeRecord[] {
   const records: RuntimeRecord[] = [];
   for (const node of root.querySelectorAll(`[${STAMP.src}]`)) {
-    records.push({
-      inst: instanceId(node),
-      values: readValues(node),
-      state: readState(node),
-      viewport: readViewport(),
-    });
+    records.push(readRecord(node));
   }
   return records;
 }

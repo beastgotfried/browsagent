@@ -38,6 +38,7 @@ Read `docs/PIPELINE.md` for the full pipeline.
 | `@browsagent/style-resolver` | Phase 2: the style rules with the CDP |
 | `@browsagent/agent-runner` | Phase 3: the worktree, the agent, the check |
 | `@browsagent/panel` | the management panel |
+| `@browsagent/extension` | the browser extension |
 | `@browsagent/cli` | the start command |
 
 ## Start

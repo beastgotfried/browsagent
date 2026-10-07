@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>browsagent options</title>
+    <style>
+      body {
+        font: 13px/1.6 ui-sans-serif, system-ui, sans-serif;
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      label {
+        display: block;
+        margin-top: 14px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 7px 9px;
+        border: 1px solid #d8dee6;
+        border-radius: 8px;
+        font-family: ui-monospace, monospace;
+      }
+      button {
+        margin-top: 14px;
+        padding: 8px 14px;
+        border: 0;
+        border-radius: 8px;
+        background: #2f6fed;
+        color: #fff;
+        cursor: pointer;
+      }
+      .hint {
+        color: #5b6472;
+        margin-top: 18px;
+      }
+      #note {
+        margin-left: 10px;
+        color: #2f6fed;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>browsagent</h1>
+
+    <label for="server">Companion address</label>
+    <input id="server" type="text" autocomplete="off" spellcheck="false" />
+
+    <label for="token">Token</label>
+    <input id="token" type="text" readonly />
+
+    <button id="save" type="button">Save</button>
+    <span id="note"></span>
+
+    <p class="hint">
+      The companion checks the token on every message. The token stays on this
+      computer.
+    </p>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

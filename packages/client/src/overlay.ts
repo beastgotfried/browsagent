@@ -103,11 +103,9 @@ export class Overlay {
   };
 
   private readonly onKey = (event: KeyboardEvent): void => {
+    // The toggle hotkey comes from the extension command. This handler only
+    // closes the overlay.
     if (event.key === 'Escape') this.stop();
-    if (event.key === 'm' && (event.metaKey || event.ctrlKey) && event.shiftKey) {
-      event.preventDefault();
-      this.toggle();
-    }
   };
 
   private highlight(node: Element): void {
