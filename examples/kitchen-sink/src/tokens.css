@@ -1,0 +1,16 @@
+/* The theme tokens. A repair that changes a value here changes every user. */
+:root {
+  --ink: #14161a;
+  --dim: #6b7280;
+  --line: #e5e7eb;
+  --paper: #ffffff;
+  --field: #f7f8fa;
+  --accent: #2563eb;
+  --warn: #b45309;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius: 10px;
+}
