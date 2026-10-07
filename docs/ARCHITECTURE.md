@@ -42,6 +42,59 @@ The runtime cannot know the expression. The tool joins the two sides:
 | Static | the compiler | the expression and the position |
 | Runtime | the client | the evaluated value and the props |
 
+## The project context
+
+The record holds one element. It does not hold the shape of the project. An
+agent that sees one element can break another element.
+
+So PREPARE makes a second thing: **one small document about the project.** One
+model call makes it. Every later model call gets it.
+
+| Fact | Value |
+|---|---|
+| Model calls to make it | 1 |
+| Size | under 1500 tokens |
+| Life | until the tree moves from the recorded commit |
+| Reader | every repair agent, read-only |
+
+The document holds five parts: what the project is, the frontend, the
+**backend APIs that the frontend calls**, the invariants, and a map of the 10
+files an agent most often needs.
+
+The invariants are the reason for the document. Example: "All API calls go
+through `src/api/client.ts`. Do not call `fetch` in a component." Without that
+line an agent can repair the element and break the backend contract.
+
+Read `docs/CONTEXT.md` for the input, the output, and the budget.
+
+## The prompt for an agent
+
+Every model call after the context pass has three messages:
+
+```
+system   the fixed instructions for the project
+system   the project context
+user     the task: the record and the problem
+```
+
+The first two messages are the same for every agent. **Only the third message is
+different for each repair.** So the context costs its tokens one time, and not
+one time for each agent.
+
+## The model provider
+
+| Value | Default | Held by |
+|---|---|---|
+| The API key | none | the companion |
+| The API base | `https://openrouter.ai/api/v1` | the companion |
+| The model | a DeepSeek model | the companion |
+
+The user gives all three. So the tool is not fixed to one provider.
+
+**The key never goes to the browser.** The extension storage is readable by a
+content script. The key is not needed in the page. The companion is a local
+Node process, so it holds the key. Read `docs/CONTEXT.md`.
+
 ## The data flow
 
 ```
@@ -63,6 +116,12 @@ served code  ->  page  ->  [client]  register the live data
     |                   the user writes the problem
     |                        |
     v                        v
+    |              [context pass]  one model call at init
+    |                        |
+    |                        v
+    |               .browsagent/context.md
+    |                        |
+    v                        v
                  [agent-runner]  worktree, agent, check
                                  |
                                  v
@@ -71,11 +130,15 @@ served code  ->  page  ->  [client]  register the live data
 
 ## The rule for the agent
 
-The agent does only four jobs.
+The agent does only five jobs.
 
-1. Read the record.
-2. Pick the repair layer: local usage or shared component.
-3. Make the smallest change in the correct expression.
-4. Check the result.
+1. Read the project context.
+2. Read the record.
+3. Pick the repair layer: local usage or shared component.
+4. Make the smallest change in the correct expression.
+5. Check the result.
 
 The agent does not search the repo. The agent does not guess a file.
+
+The project context is the guard. It names the invariants, so a repair does not
+break the backend, the theme, or the route table.

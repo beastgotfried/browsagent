@@ -4,7 +4,7 @@ The pipeline has three phases.
 
 1. **PREPARE** — the build makes the source map and the index.
 2. **LOCATE** — the user makes a mark. The tool finds the exact record.
-3. **REPAIR** — an agent makes the repair. The tool checks the pixels.
+3. **REPAIR** — an agent makes the repair. The tool runs the checks.
 
 Each phase has one actor and one output. The output of one phase is the input
 of the next phase.
@@ -13,11 +13,25 @@ of the next phase.
 
 ## PHASE 1: PREPARE
 
-**Actor:** the build plugin and the server.
-**Trigger:** the user starts the development server.
-**Output:** the index.
+**Actor:** the context pass, the build plugin, and the server.
+**Trigger:** the project init, then each development server start.
+**Output:** the project context, then the index.
 
-### Steps
+### Part A: the project context
+
+This part runs one time, at the project init. It runs again when the tree has
+moved too far from the recorded commit. Read `docs/CONTEXT.md`.
+
+1. The tool reads a sample of the project: the tree, the manifests, the config
+   files, the entry points, the route files, and the API calls.
+2. One model call makes the context. The answer is under 1500 tokens.
+3. The tool writes `.browsagent/context.md`.
+4. The tool records the commit and the token count in `.browsagent/context.json`.
+5. Every later model call gets this context with the task.
+
+### Part B: the index
+
+1. The plugin reads each source file.
 
 1. The plugin reads each source file.
 2. The plugin adds a stamp to each element. The stamp holds the source position.
@@ -28,6 +42,17 @@ of the next phase.
 7. The client sends one record for each node to the server.
 8. The server stores all records in the index.
 9. The server marks each node as `editable: true` or `editable: false`.
+
+### The context holds
+
+- what the project is: the framework, the bundler, the package manager, the
+  start command,
+- the frontend: the routes, the entry points, the component roots, the styling
+  system,
+- the backend: the base URL, the endpoints, the shape of the request and the
+  answer, the auth,
+- the invariants: what must not break, and the file that proves it,
+- the map: the 10 files that an agent most often needs.
 
 ### The index holds
 
@@ -87,31 +112,45 @@ of the next phase.
 
 ## PHASE 3: REPAIR
 
-**Actor:** one agent and the manager.
+**Actor:** one or more agents and the manager.
 **Trigger:** the task enters the queue.
-**Output:** a checked repair with before and after pictures.
+**Output:** a repair with a diff and a check result.
 
 ### Steps
 
 1. The manager makes one worktree for the task.
-2. A second development server starts on its own port.
-3. The agent gets the task record. The agent does not search the repo.
-4. The agent reads only the named files.
+2. The manager reads the project context. It reports a stale context.
+3. The agent gets the project context and the task record.
+4. The agent does not search the repository.
 5. The agent makes a short plan.
 6. The panel shows the plan. The user can agree or change it.
 7. The agent changes the smallest expression.
 8. The type check and the lint run.
-9. The second server renders the page.
-10. The tool takes pictures at each screen width of the project.
-11. The tool compares each picture with the before picture.
-12. The tool checks the access data.
-13. The panel shows the diff, the pictures, and the cost.
-14. The user agrees or rejects the repair. The user can undo it with one click.
+9. The panel shows the diff and the cost.
+10. The user agrees or rejects the repair.
+
+### The prompt for each agent
+
+```
+system   the fixed instructions for the project
+system   the project context
+user     the task: the record and the problem
+```
+
+Several agents can run at the same time. Each agent gets the same two system
+messages and one different task.
 
 ### Failure points
 
 - The type check fails. Then the agent tries again. The manager stops the task
   after 3 tries.
-- A picture gets worse. Then the task fails.
 - Two agents change the same file. Then the merge step finds the conflict.
 - The agent cannot check the result. Then the agent reports `unchecked`.
+- The context is stale. Then the tool asks the user. It does not use the context
+  without a report.
+
+### Not in this phase
+
+The picture check is dropped. There is no screenshot step and no comparison of
+screen widths. The remaining checks are the type check and the lint. Read
+`docs/REVIEW.md` for what that costs.
