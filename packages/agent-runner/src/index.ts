@@ -121,6 +121,29 @@ function passed(check: CheckResult): boolean {
 }
 
 /**
+ * True when a provider fault is transient and a try remains.
+ *
+ * The code 'provider' covers a network fault, a timeout, an HTTP 5xx, an
+ * answer that is not JSON, and an answer with no choice. A dropped connection
+ * and an HTTP 5xx are worth another attempt. The codes 'no-key',
+ * 'data-policy', and 'no-credit' are permanent: a retry spends money for the
+ * same answer.
+ */
+function retryAllowed(error: unknown, tries: number, maxTries: number): error is ProviderError {
+  return error instanceof ProviderError && error.code === 'provider' && tries < maxTries;
+}
+
+/** True when the check asks for another attempt and a try remains. */
+function checkAllowsRetry(
+  check: CheckResult,
+  diff: string,
+  tries: number,
+  maxTries: number,
+): boolean {
+  return check.ran && (!passed(check) || diff.trim() === '') && tries < maxTries;
+}
+
+/**
  * Phase 3 of the pipeline.
  *
  * The runner does five steps for each task:
@@ -206,7 +229,9 @@ export class AgentRunner {
    *
    * The runner asks for one plan. Then it asks for one edit for each try. It
    * checks the code after each edit. It tries again while the check fails and
-   * the try count is under maxTries.
+   * the try count is under maxTries. A transient provider fault also gets one
+   * more try while the count allows it. A permanent provider fault ends the
+   * task now.
    *
    * The state tells the truth about the check:
    * - `done`: the agent made an edit, the diff is not empty, and every gate
@@ -236,17 +261,41 @@ export class AgentRunner {
     // try left makes no edit.
     if (task.tries < maxTries) {
       try {
-        do {
+        // One pass is one attempt. The runner leaves the loop when the check
+        // accepts the attempt, when the tries run out, or when a fault ends
+        // the task.
+        for (;;) {
           // Count the attempt on the task. The task store holds this object.
           task.tries += 1;
-          await this.agent.edit(task, cwd);
+          try {
+            await this.agent.edit(task, cwd);
+          } catch (error) {
+            // A transient provider fault is worth one more attempt while a
+            // try remains. This retry exists because a provider throw on the
+            // first edit skipped `check = await this.checkCode(cwd)` below,
+            // and the evidence then said "typecheckOk did not run" while the
+            // bare catch at packages/agent-runner/src/index.ts:221 (commit
+            // 547bc28) discarded the provider words.
+            if (!retryAllowed(error, task.tries, maxTries)) throw error;
+            // Keep the words of the last fault. The next attempt replaces
+            // them with its own result.
+            agentFault = faultWords(error);
+            agentFaultCode = error.code;
+            continue;
+          }
+          // The edit finished. An earlier transient fault is not the end of
+          // the task: the check below decides.
+          agentFault = null;
+          agentFaultCode = null;
           // The diff is evidence. Evidence is measured, never reported. The
           // agent returns a summary, and that summary is often null. So the
           // runner measures the diff itself, from the worktree.
           diff = await worktreeDiff(cwd);
           check = await this.checkCode(cwd);
-          // A repair with no change is not a repair. Try again.
-        } while (check.ran && (!passed(check) || diff.trim() === '') && task.tries < maxTries);
+          // A repair with no change is not a repair. Try again while the
+          // check asks for it and the tries remain.
+          if (!checkAllowsRetry(check, diff, task.tries, maxTries)) break;
+        }
       } catch (error) {
         agentThrew = true;
         // Keep the words of the fault. A failed task with no reason helps
