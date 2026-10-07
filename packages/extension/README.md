@@ -212,9 +212,9 @@ The mark carries the whole element. The companion does not keep a copy of the
 page. Therefore a worker restart, a dropped socket, or a page reload cannot
 lose the data.
 
-`problem` is `null` while the problem editor does not exist. The companion then
-answers with the record and makes no task. A mark with a problem answers with a
-task.
+A click sends `problem: null`. The companion then answers with the record and
+makes no task. The side panel sends the problem text from its form with a
+`send-mark` message. A mark with a problem answers with a task.
 
 The companion answers on the same socket:
 
@@ -226,12 +226,8 @@ The companion answers on the same socket:
 
 ## Not made yet
 
-- The problem editor. The worker sends `problem: null`. The side panel shows
-  the record and does not ask for the problem text.
 - The style finder in the extension. Read the section "The permission we do
   NOT have" above.
-- The task flow in the side panel. The panel shows the status, the last
-  selection, and the record from the companion.
 
 ## The parts
 

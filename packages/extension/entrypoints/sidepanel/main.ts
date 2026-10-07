@@ -296,7 +296,11 @@ function card(task: Task): HTMLLIElement {
     const typecheck =
       task.evidence.typecheckOk === null ? 'not run' : String(task.evidence.typecheckOk);
     const lint = task.evidence.lintOk === null ? 'not run' : String(task.evidence.lintOk);
-    item.append(el('p', `typecheck: ${typecheck} | lint: ${lint}`));
+    item.append(
+      el('p', `typecheck: ${typecheck} | lint: ${lint} | tries: ${task.evidence.tries}`),
+    );
+    // A fault names the reason of a stopped task. A state alone does not.
+    if (task.evidence.fault !== null) item.append(el('p', `fault: ${task.evidence.fault}`));
   }
 
   const diffText = task.diff ?? '';

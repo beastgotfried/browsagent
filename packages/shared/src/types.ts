@@ -279,7 +279,8 @@ export interface ProviderConfig {
 
 /**
  * The class of a provider fault. The model client names the value. The
- * evidence of a task keeps it, and the panel reads it.
+ * evidence of a task keeps it. The companion reads it to report the provider
+ * state.
  */
 export type ProviderErrorCode =
   | 'data-policy'

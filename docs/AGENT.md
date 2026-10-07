@@ -98,11 +98,14 @@ and cannot claim a pass.
 2. `checkCode` runs the lint only when a lint command is set. A lint that did
    not run gives `lintOk: null`.
 3. The runner runs the edit again while a gate that ran failed or the diff is
-   empty, and the try count is under `maxTries`. The CLI sets 3 tries.
+   empty, and the try count is under `maxTries`. The CLI sets 3 tries. A
+   transient provider fault on the edit gets one more try in the same way. A
+   permanent provider fault, such as a refused key, stops the task at once.
 4. The state is `done` when the agent made an edit, the diff is not empty, and
-   every gate that ran passed. The state is `failed` when a gate failed after
-   the last try, when the diff stayed empty, or when the agent threw a fault.
-   The state is `unchecked` when no gate ran.
+   every gate that ran passed. A transient fault that a later try replaces
+   does not stop `done`. The state is `failed` when a gate failed after the
+   last try, when the diff stayed empty, or when a fault ended the loop. The
+   state is `unchecked` when no gate ran.
 
 ## The diff
 

@@ -25,8 +25,8 @@ verify    one scout    read-only check of the pushed range. It runs no proof
 
 The writers are **serial**. One repository has one working tree. Two writers in
 one tree overwrite each other. The read-only steps are parallel, because a read
-does not change the tree. The verify step runs no command that writes to the
-tree. It does not run `pnpm prove`. Read "The end-to-end proof".
+does not change the tree. The verify step writes no tracked file. It does not
+run `pnpm prove`. Read "The end-to-end proof".
 
 ## The gates
 

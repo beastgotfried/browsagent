@@ -23,6 +23,10 @@
  * a fault outside main leaves the patch in the tree. Run `git status
  * --short` after the proof.
  *
+ * Step 7 measures the tree itself with `git apply --check --reverse`. A
+ * reverse apply succeeds only when the patch is in place. The tool therefore
+ * cannot report a false PASS.
+ *
  * The script uses the node builtins and the `ws` package that the
  * index-service already installs. The root package does not depend on `ws`,
  * so the script resolves the package from the index-service directory. The
@@ -31,7 +35,7 @@
  * The script never reads the API key. Every printed line passes the
  * redaction function first.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -46,7 +50,10 @@ const { WebSocket } = serviceRequire('ws');
 
 const HOST = '127.0.0.1';
 // The proof asks the system for a free port at start. The child process and
-// the websocket then use the same value. Two proofs do not fight for one port.
+// the websocket then use the same value. Two proofs rarely fight for one
+// port. The probe closes before the companion binds, so the proof does not
+// reserve the port. A collision makes step 1 fail. It cannot give a false
+// PASS.
 let port = 0;
 // The companion refuses a caller without the shared token. The script holds
 // the same value in the environment of the child process.
@@ -150,7 +157,10 @@ function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
-/** Ask the system for one free port. The proof owns the port for one run. */
+/** Ask the system for one free port. The proof uses the value for one run.
+ *
+ * The probe closes before the companion binds. The proof does not reserve the
+ * port, so a collision is possible. Step 1 reports a collision as a FAIL. */
 async function freePort() {
   const probe = createServer();
   const chosen = await new Promise((resolveListen, rejectListen) => {
@@ -221,8 +231,37 @@ function diffFiles(diff) {
   for (const line of diff.split('\n')) {
     if (line.startsWith('--- a/')) names.add(line.slice('--- a/'.length));
     else if (line.startsWith('+++ b/')) names.add(line.slice('+++ b/'.length));
+    // A rename-only patch has no `---` or `+++` line. It names the old file
+    // and the new file on these lines. Record both, so the revert puts the
+    // old file back and removes the new one.
+    else if (line.startsWith('rename from ')) names.add(line.slice('rename from '.length));
+    else if (line.startsWith('rename to ')) names.add(line.slice('rename to '.length));
   }
   return [...names];
+}
+
+/**
+ * Prove that the patch is in the working tree.
+ *
+ * The tool reports `applied: true`. This function measures the tree itself: a
+ * reverse apply succeeds only when the patch is in place. The check reads the
+ * tree and the index. It writes nothing.
+ */
+function checkPatchInTree(diff) {
+  const check = spawnSync('git', ['apply', '--check', '--reverse', '-'], {
+    cwd: root,
+    input: diff,
+    encoding: 'utf8',
+  });
+  if (check.error !== undefined) {
+    throw new Error(`The script cannot check the patch with git. ${words(check.error)}`);
+  }
+  if (check.status !== 0) {
+    const said = String(check.stderr ?? '').trim();
+    throw new Error(
+      `The patch is not in the working tree. git said: ${said === '' ? 'no words' : said}`,
+    );
+  }
 }
 
 function printDiff(diff) {
@@ -439,7 +478,10 @@ async function stopCompanion() {
   }
 
   if (child === null) return { ok: false, detail: 'the companion never started' };
-  if (exitInfo !== null) return { ok: true, detail: exitWords() };
+  if (exitInfo !== null) {
+    // A spawn fault is not a stopped companion. The step must not report PASS.
+    return { ok: exitInfo.error === null, detail: exitWords() };
+  }
 
   child.kill('SIGTERM');
   const stopped = await Promise.race([exitPromise, sleep(STOP_TIMEOUT_MS).then(() => false)]);
@@ -596,7 +638,12 @@ const steps = [
         throw new Error(`The tool did not apply the patch. ${answer.result.message}`);
       }
       accepted = answer.result;
-      return `applied, files ${accepted.files.length === 0 ? 'absent' : accepted.files.join(', ')}`;
+      // The tool says that the patch is applied. Measure the tree too, so the
+      // proof does not trust the tool alone. A missing patch throws here.
+      checkPatchInTree(task.diff);
+      return `applied, files ${
+        accepted.files.length === 0 ? 'absent' : accepted.files.join(', ')
+      }, the reverse apply succeeds`;
     },
     after: () => {
       console.log(redacted(`  ${accepted.message}`));

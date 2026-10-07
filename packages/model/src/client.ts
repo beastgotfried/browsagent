@@ -115,14 +115,18 @@ function parseJson(text: string): unknown {
 const MAX_WORDS = 500;
 
 /**
- * Remove a key that the provider or a proxy echoed in a fault body.
+ * Remove a key that the provider, a proxy, or a command echoed.
  *
- * The key must never leave this file. A fault body is not a trusted place: a
- * proxy can put the whole request, headers and all, into the answer. The
- * function removes the configured key itself. Two common key shapes come out
- * too, because another key or a part of one can be in the same body.
+ * The key must never leave the companion. A fault body is not a trusted
+ * place: a proxy can put the whole request, headers and all, into the answer.
+ * A gate command runs with the environment of the companion, so its output
+ * can hold the key too. The companion uses this function on every fault that
+ * goes to the panel.
+ *
+ * The function removes the configured key itself. Two common key shapes come
+ * out too, because another key or a part of one can be in the same text.
  */
-function scrubbed(text: string, key: string | null): string {
+export function scrubKey(text: string, key: string | null): string {
   const shaped = text
     .replace(/Bearer\s+\S+/gi, 'Bearer <removed>')
     .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-<removed>');
@@ -141,11 +145,11 @@ function providerWords(body: unknown, raw: string, key: string | null): string {
     if (typeof fault === 'object' && fault !== null) {
       const message = (fault as Record<string, unknown>)['message'];
       if (typeof message === 'string' && message.trim() !== '') {
-        return scrubbed(message.trim(), key).slice(0, MAX_WORDS);
+        return scrubKey(message.trim(), key).slice(0, MAX_WORDS);
       }
     }
   }
-  const trimmed = scrubbed(raw.trim(), key);
+  const trimmed = scrubKey(raw.trim(), key);
   if (trimmed === '') return 'no words';
   return trimmed.length > MAX_WORDS ? `${trimmed.slice(0, MAX_WORDS)}...` : trimmed;
 }

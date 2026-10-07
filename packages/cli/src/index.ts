@@ -17,6 +17,7 @@ import {
   loadToken,
   ModelClient,
   ProviderError,
+  scrubKey,
   type ProviderErrorCode,
 } from '@browsagent/model';
 import {
@@ -45,6 +46,10 @@ const PREPARE = 'pnpm install --frozen-lockfile --prefer-offline';
 
 /** The manager stops one task after this many tries. */
 const MAX_TRIES = 3;
+
+/** The reason of a task whose two diff measurements do not agree. */
+const MISMATCH_FAULT =
+  'The two measurements of the task diff do not agree. The tool kept the first measurement.';
 
 function currentCommit(): string {
   try {
@@ -102,22 +107,38 @@ async function start(): Promise<void> {
   let keyRefused = false;
 
   /**
-   * Keep the words of one fault for the panel.
+   * Remove the key from the words of one fault.
+   *
+   * A gate or a prepare command runs in a worktree with the environment of
+   * the companion. A child can echo the key. The words of a fault go to the
+   * panel, so they pass this function first. The key never goes to the
+   * browser.
+   */
+  const safeFault = (words: string | null): string | null =>
+    words === null ? null : scrubKey(words, config.apiKey);
+
+  /**
+   * Keep the words of one provider fault for the panel.
    *
    * The value can be a ProviderError, the fault string of a task with its
-   * provider code, or a plain fault. A plain fault carries no code: only the
-   * words of a task fault survive the runner.
+   * provider code, or a plain fault. A plain fault carries no code: a gate, a
+   * prepare command, and the agent give plain faults. Those faults belong to
+   * the task, and the panel reads their words in the task evidence. They must
+   * not move the provider state, and the provider line must not report them
+   * as the words of the provider.
    */
   const noteFault = (fault: unknown, code: ProviderErrorCode | null = null): void => {
     if (fault instanceof ProviderError) {
-      providerFault = fault.message;
+      providerFault = safeFault(fault.message);
       // The 401 code is 'key-refused'. The code 'no-key' means that no key is
       // set, and hasKey already reports that case.
       if (fault.code === 'key-refused') keyRefused = true;
       return;
     }
-    if (typeof fault === 'string' && fault.trim() !== '') {
-      providerFault = fault;
+    // Only a provider fault belongs in the provider state. The evidence holds
+    // a code for a provider fault only.
+    if (code !== null && typeof fault === 'string' && fault.trim() !== '') {
+      providerFault = safeFault(fault);
       // A task fault carries the code of the provider. Only a refused key
       // moves the panel to the key bad state.
       if (code === 'key-refused') keyRefused = true;
@@ -163,11 +184,13 @@ async function start(): Promise<void> {
   const onTask = async (task: Task): Promise<Task> => {
     try {
       const result = await runner.run(task);
-      // The runner keeps the words and the provider code of a task fault in
-      // the evidence. Give both to the panel: a refused key moves the
-      // provider state to "key bad", and any other provider fault shows its
-      // words.
-      noteFault(result.evidence.fault, result.evidence.faultCode);
+      // The evidence goes to the panel. The words of a fault pass the key
+      // remover first, because a gate command can echo the key from the
+      // environment.
+      const evidence = { ...result.evidence, fault: safeFault(result.evidence.fault) };
+      // The runner keeps the provider code of a task fault in the evidence. A
+      // provider fault marks the provider state. A gate fault does not.
+      noteFault(evidence.fault, evidence.faultCode);
       const cwd = `${worktreeDir}/${task.id.slice(0, 8)}`;
       // The runner measures the diff now. Measure it here a second time. The
       // two measurements must agree. A difference means one of them is wrong,
@@ -181,7 +204,12 @@ async function start(): Promise<void> {
           plan: result.plan.text,
           files: result.plan.files,
           diff: result.diff,
-          evidence: { ...result.evidence, diff: result.diff },
+          // The task failed with no fault of its own. Name the reason.
+          evidence: {
+            ...evidence,
+            diff: result.diff,
+            fault: evidence.fault ?? MISMATCH_FAULT,
+          },
           updatedAt: new Date().toISOString(),
         };
       }
@@ -191,7 +219,7 @@ async function start(): Promise<void> {
         plan: result.plan.text,
         files: result.plan.files,
         diff: measured,
-        evidence: { ...result.evidence, diff: measured },
+        evidence: { ...evidence, diff: measured },
         updatedAt: new Date().toISOString(),
       };
       // A done task keeps its worktree: the accept step needs the diff. A
@@ -218,7 +246,7 @@ async function start(): Promise<void> {
           lintOk: null,
           diff: '',
           tries: task.tries,
-          fault,
+          fault: safeFault(fault),
           // A provider fault keeps its code on this path too, so the evidence
           // names the class of the fault.
           faultCode: error instanceof ProviderError ? error.code : null,

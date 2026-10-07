@@ -58,7 +58,13 @@ function detailRows(task: Task): string[] {
     const typecheck =
       task.evidence.typecheckOk === null ? 'not run' : String(task.evidence.typecheckOk);
     const lint = task.evidence.lintOk === null ? 'not run' : String(task.evidence.lintOk);
-    rows.push(`<p class="card__row">typecheck: ${typecheck} | lint: ${lint}</p>`);
+    rows.push(
+      `<p class="card__row">typecheck: ${typecheck} | lint: ${lint} | tries: ${task.evidence.tries}</p>`,
+    );
+    // A fault names the reason of a stopped task. A state alone does not.
+    if (task.evidence.fault !== null) {
+      rows.push(`<p class="card__row">fault: ${escapeHtml(task.evidence.fault)}</p>`);
+    }
   }
 
   const diff = task.diff ?? '';

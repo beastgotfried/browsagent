@@ -50,9 +50,15 @@ export function commandWords(result: CommandResult): string {
 /** The most characters of a gate fault that the evidence keeps. */
 const MAX_GATE_WORDS = 500;
 
+/** The reason of a task that made no change. */
+const NO_CHANGE_FAULT = 'The task made no change. The diff is empty.';
+
 /** The words of one fault value. The value can be an Error or a plain value. */
 export function faultWords(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const words = error instanceof Error ? error.message : String(error);
+  // An empty message names no reason. A failed task with no reason helps
+  // nobody. Give the fault words of its own.
+  return words.trim() === '' ? 'The fault carries no message.' : words;
 }
 
 /** The words of one failed gate, capped at 500 characters. */
@@ -109,8 +115,11 @@ interface CheckResult {
   typecheckOk: boolean;
   /** True when the lint passed. Null when the lint did not run. */
   lintOk: boolean | null;
-  /** True when every configured gate started. */
-  ran: boolean;
+  /**
+   * True when the type check started. The type check is the required gate, so
+   * this flag carries the answer of the whole check.
+   */
+  typecheckRan: boolean;
   /** The words of the failed gate. Null when every gate that ran passed. */
   fault: string | null;
 }
@@ -126,8 +135,8 @@ function passed(check: CheckResult): boolean {
  * The code 'provider' covers a network fault, a timeout, an HTTP 5xx, an
  * answer that is not JSON, and an answer with no choice. A dropped connection
  * and an HTTP 5xx are worth another attempt. The codes 'no-key',
- * 'data-policy', and 'no-credit' are permanent: a retry spends money for the
- * same answer.
+ * 'key-refused', 'data-policy', and 'no-credit' are permanent: a retry spends
+ * money for the same answer.
  */
 function retryAllowed(error: unknown, tries: number, maxTries: number): error is ProviderError {
   return error instanceof ProviderError && error.code === 'provider' && tries < maxTries;
@@ -140,7 +149,7 @@ function checkAllowsRetry(
   tries: number,
   maxTries: number,
 ): boolean {
-  return check.ran && (!passed(check) || diff.trim() === '') && tries < maxTries;
+  return check.typecheckRan && (!passed(check) || diff.trim() === '') && tries < maxTries;
 }
 
 /**
@@ -202,7 +211,7 @@ export class AgentRunner {
     if (!typecheck.started) {
       // The required gate did not start. No other gate can help. Keep the
       // words of the fault, so the evidence names the reason.
-      return { typecheckOk: false, lintOk: null, ran: false, fault: gateFault(typecheck) };
+      return { typecheckOk: false, lintOk: null, typecheckRan: false, fault: gateFault(typecheck) };
     }
 
     const lintCommand = this.options.lint?.trim();
@@ -221,7 +230,7 @@ export class AgentRunner {
     if (!typecheckOk) fault = gateFault(typecheck);
     else if (lint !== null && lint.code !== 0) fault = gateFault(lint);
 
-    return { typecheckOk, lintOk, ran: lint === null || lint.started, fault };
+    return { typecheckOk, lintOk, typecheckRan: true, fault };
   }
 
   /**
@@ -240,8 +249,10 @@ export class AgentRunner {
    *   agent threw a fault.
    * - `unchecked`: no gate ran.
    *
-   * A fault never reports `done`. The evidence holds the words of the fault
-   * in `evidence.fault` and the provider code in `evidence.faultCode`.
+   * A fault that ends the task never reports `done`. The evidence holds the
+   * words of the fault in `evidence.fault` and the provider code in
+   * `evidence.faultCode`. A transient fault that a later try replaces leaves
+   * no fault in the evidence, and the task can end `done`.
    */
   async run(
     task: Task,
@@ -252,7 +263,7 @@ export class AgentRunner {
     const plan = await this.agent.plan(task, cwd);
 
     let diff = '';
-    let check: CheckResult = { typecheckOk: false, lintOk: null, ran: false, fault: null };
+    let check: CheckResult = { typecheckOk: false, lintOk: null, typecheckRan: false, fault: null };
     let agentThrew = false;
     let agentFault: string | null = null;
     let agentFaultCode: ProviderErrorCode | null = null;
@@ -315,13 +326,16 @@ export class AgentRunner {
     }
 
     // The agent fault comes first: it stopped the loop. A failed gate is the
-    // other reason.
-    const fault = agentFault ?? check.fault;
+    // other reason. A task that used every try with an empty diff and no
+    // fault still needs a reason: the state is failed, and the panel must
+    // show why.
+    const fault = agentFault ?? check.fault ?? (diff.trim() === '' ? NO_CHANGE_FAULT : null);
     const evidence: Evidence = {
       // A gate that did not run reports null. It never reports a pass and it
-      // never reports a failure.
-      typecheckOk: check.ran ? check.typecheckOk : null,
-      lintOk: check.lintOk,
+      // never reports a failure. A fault after a completed check makes that
+      // check stale: the worktree changed after it. Report null then too.
+      typecheckOk: !agentThrew && check.typecheckRan ? check.typecheckOk : null,
+      lintOk: agentThrew ? null : check.lintOk,
       diff,
       tries: task.tries,
       fault,
@@ -331,7 +345,7 @@ export class AgentRunner {
 
     let state: TaskState = 'failed';
     if (!agentThrew) {
-      if (!check.ran) state = 'unchecked';
+      if (!check.typecheckRan) state = 'unchecked';
       // An empty diff is no repair. A fault is no repair. The state must not
       // say done in either case.
       else if (fault === null && passed(check) && diff.trim() !== '') state = 'done';

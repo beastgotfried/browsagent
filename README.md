@@ -98,8 +98,10 @@ The proof needs a built tree (`pnpm build`) and a provider key. It makes live
 model calls: a plan call and one or more edit calls. The provider charges for
 them.
 
-The proof binds one local port for one run, so two proofs do not fight for
-one port.
+The proof asks the system for a free port for one run. Two proofs take
+different ports in almost every run. The probe closes before the companion
+binds, so a rare collision is possible. Step 1 then fails. A collision cannot
+give a false PASS.
 
 The accept step writes the patch into the working tree. The script records
 the touched files before the accept, and puts them back when it ends, and on

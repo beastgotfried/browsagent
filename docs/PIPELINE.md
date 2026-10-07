@@ -186,7 +186,11 @@ A stale context does not block a repair. The panel shows the stale mark.
    workspace package without its `dist` has no types for its importers.
 7. The loop runs the edit again while a gate that ran failed or the diff is
    empty, and the try count is under `maxTries`. The CLI sets 3 tries.
-   `Task.tries` counts the tries.
+   `Task.tries` counts the tries. A transient provider fault on the edit gets
+   one more try in the same way: the code `provider` covers a network fault,
+   a timeout, an HTTP 5xx, and a bad answer. A later try can then pass the
+   check, and the task can end `done`. A permanent provider fault, such as a
+   refused key, stops the task at once.
 8. `AgentRunner.run` measures the diff of the worktree with `worktreeDiff`
    after each edit. The words of the agent are a summary, not the diff. The
    measurement records an intent to add for every untracked path first, so a
@@ -233,11 +237,13 @@ user message.
 
 - The type check fails. Then the agent tries again. The runner stops the task
   after `maxTries` tries (3 in the CLI).
-- A fault stops the repair. The state is `failed`. `AgentRunner.run` catches a
-  fault from the agent edit and keeps the measured diff. `onTask` catches a
-  fault that escapes the runner, removes the worktree, and writes an empty
-  diff. A `done` task keeps its worktree until the accept step. A `failed` or
-  `unchecked` task loses its worktree at once.
+- A transient provider fault on the edit gets one more try while a try
+  remains. The task can then end `done`. A permanent provider fault, such as
+  a refused key, and every other fault stop the repair: the state is `failed`.
+  `AgentRunner.run` catches a fault from the agent edit and keeps the measured
+  diff. `onTask` catches a fault that escapes the runner, removes the
+  worktree, and writes an empty diff. A `done` task keeps its worktree until
+  the accept step. A `failed` or `unchecked` task loses its worktree at once.
 - The type check command does not start. Then no gate ran, and the state is
   `unchecked`. The evidence reports `typecheckOk: null`. It never claims a
   failed check that never ran.
@@ -257,8 +263,9 @@ reports null. It never reports a pass.
 
 The state names the result: `done` when the agent made an edit, the diff is
 not empty, and every gate that ran passed. It is `failed` when a gate failed
-after the last try, when the diff stayed empty, or when the agent threw a
-fault. It is `unchecked` when no gate ran.
+after the last try, when the diff stayed empty, or when a fault ended the
+loop. It is `unchecked` when no gate ran. Every failure names its reason in
+`evidence.fault`, so the panel shows why the task stopped.
 
 There is no screenshot step and no comparison at a screen width.
 
