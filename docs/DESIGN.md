@@ -17,18 +17,22 @@ The compiler gives the expression. The runtime gives the result. You need both.
 ## D4. One worktree for each agent
 
 Two agents must not change one file at one time. A worktree is a separate copy
-of the files. The merge step finds the conflict.
+of the files. The user applies one patch to the working tree with `git apply`.
+A second patch fails at `git apply --check` when the tree moved.
 
 ## D5. No picture check
 
 There is no screenshot step and no comparison at a screen width. The word
-"fixed" means "the type check and the lint pass, and the diff is small".
+"fixed" means "the type check passed, the lint passed when it ran, and the
+diff is small".
 
 A repair is not measured by a picture. **A repair is measured by the diff.**
 
 ## D6. Development only
 
-The stamp exists in the development build only. The production build is clean.
+The stamp belongs in the development build only. The production build must be
+clean. **The plugin does not enforce this today.** It has no `apply: 'serve'`
+gate. Read finding 9 in `docs/REVIEW.md`.
 
 ## D7. One context for every agent
 
@@ -43,7 +47,7 @@ the companion, not in the browser. The extension storage is readable by a
 content script. The key is not needed in the page.
 
 The companion reads the values from the environment, then
-`~/.browsagent/config.json`, then the pi provider store at
+`<project>/.browsagent/config.json`, then the pi provider store at
 `~/.pi/agent/auth.json`. Read `docs/CONTEXT.md`.
 
 Two model slots: `model` for the repair and `modelCheap` for the context pass.
@@ -59,11 +63,13 @@ own tooling.**
 
 ## Out of scope for now
 
-The style finder is not built. The record holds no style rules, so the agent
-opens the stylesheet and finds the rule itself. This is slower and less exact.
+The style finder exists in `@browsagent/style-resolver`, but the companion
+does not wire it. The CLI sets no `styles` callback, so a live record holds no
+style rules. The agent opens the stylesheet and finds the rule itself. This is
+slower and less exact. Read findings 1 to 4 in `docs/REVIEW.md`.
 
-The loop is worth more than the precision. The style finder becomes a later
-quality step.
+The loop is worth more than the precision. The style finder is wired in a
+later quality step.
 
 ## Open questions
 
@@ -71,5 +77,6 @@ quality step.
    (The plugin is the first target.)
 2. Which framework first? React with Vite. (The first target.)
 3. Does the agent change files directly, or show diffs for agreement?
-4. Which agent runtime?
+   (Answered by D9.)
+4. Which agent runtime? (Answered: `ModelAgent`. Read `docs/AGENT.md`.)
 5. One user on one computer, or a team?

@@ -14,8 +14,9 @@ Point at one element. Write the problem. The tool does the rest:
 
 1. The tool finds the exact source position of the element.
 2. One agent makes the smallest repair in a separate worktree.
-3. The tool runs the type check and the lint.
-4. The panel shows the diff. You agree or reject.
+3. The tool runs the type check. It runs the lint when the project has one.
+4. The side panel shows the diff. You press **Accept the repair**, and the tool
+   applies the patch with `git apply`. The tool makes no commit and no branch.
 
 ## The three phases
 
@@ -33,32 +34,45 @@ The tool makes one small document about the project: the framework, the
 routes, **the backend APIs the frontend calls**, and the invariants that must
 not break.
 
-One model call makes it. Every repair agent gets it. Read `docs/CONTEXT.md`.
+One model call makes it. Every repair agent gets it. Press **Make the context
+again** in the side panel to make the document, and to make it again after a
+large change. Read `docs/CONTEXT.md`.
 
-The agent runs through an API key that the user gives. The key, the API base,
-and the model live in the companion, not in the browser.
+The agent uses an API key that the user gives. The key, the API base, and the
+model live in the companion, not in the browser.
 
 ## The packages
 
 | Package | Job |
 |---|---|
 | `@browsagent/shared` | the types and the protocol |
-| `@browsagent/vite-plugin` | Phase 1: add the source stamp |
-| `@browsagent/client` | Phase 1 and 2: the register and the overlay |
-| `@browsagent/index-service` | Phase 2: the index and the record |
-| `@browsagent/style-resolver` | Phase 2: the style rules with the CDP |
-| `@browsagent/agent-runner` | Phase 3: the worktree, the agent, the check |
+| `@browsagent/vite-plugin` | the source stamp |
+| `@browsagent/client` | the overlay and the read of one node |
+| `@browsagent/index-service` | the record join, the task store, and the routes |
+| `@browsagent/style-resolver` | the style rules with the CDP. The CLI does not wire it yet |
 | `@browsagent/model` | the provider: the key, the base, the model |
-| `@browsagent/panel` | the management panel |
-| `@browsagent/extension` | the browser extension |
-| `@browsagent/cli` | the start command |
+| `@browsagent/context` | the project context: one model call makes it |
+| `@browsagent/agent-runner` | the worktree, the agent loop, the check, and the accept |
+| `@browsagent/panel` | the task list markup and CSS. No package imports it today |
+| `@browsagent/extension` | the side panel, the content script, and the worker |
+| `@browsagent/cli` | the companion start command |
 
 ## Start
 
+Build the packages. Then start the companion and the page under test:
+
 ```bash
 pnpm install
-pnpm build
-pnpm demo
+pnpm build          # build every package
+
+pnpm dev            # the companion on port 4517
+pnpm demo           # a second terminal: the page under test on port 4519
+```
+
+Load the extension in the browser:
+
+```
+chrome://extensions -> Load unpacked -> packages/extension/.output/chrome-mv3
 ```
 
 Set the provider before the first repair:
@@ -69,12 +83,16 @@ export BROWSAGENT_API_BASE=https://openrouter.ai/api/v1
 export BROWSAGENT_MODEL=...
 ```
 
+The companion also reads `<project>/.browsagent/config.json` and
+`~/.pi/agent/auth.json`. Read `docs/CONTEXT.md`.
+
 ## The documents
 
 | Document | Holds |
 |---|---|
 | `docs/PIPELINE.md` | the three phases |
-| `docs/ARCHITECTURE.md` | the maps, the stamp, the context, the provider |
+| `docs/ARCHITECTURE.md` | the packages, the maps, the stamp, the context, the provider |
+| `docs/AGENT.md` | the agent loop, the three tools, and the three messages |
 | `docs/CONTEXT.md` | the project context and the model provider |
 | `docs/DESIGN.md` | the decisions |
 | `docs/REVIEW.md` | the defects that the review proved |
@@ -82,9 +100,16 @@ export BROWSAGENT_MODEL=...
 
 ## Status
 
-This repository holds the scaffold. The interfaces are complete. The bodies
-are not complete.
+The repair loop is complete. A mark makes a task. The agent writes a repair in
+one worktree. The type check runs. **Accept** applies the patch with
+`git apply`.
 
-**The scope is now the agent runtime only.** The style finder, the lane
-decider, and the stamp adapters for other bundlers are dropped. Read
-`docs/REVIEW.md`.
+Two parts of the loop are open:
+
+- The whole-page index has no sender. No code serves the client script path
+  `/@browsagent/client.js`, and no code sends the `register` message. The mark
+  still works, because the mark carries its own element.
+- The companion does not wire the style finder. A live record holds no style
+  rules.
+
+Read `docs/REVIEW.md` for the open findings.

@@ -6,6 +6,10 @@ and kept only the ones that the code proves. This page holds the survivors.
 **Every finding below has a file and a line. Each one is a real defect at
 `ed0e798`.**
 
+A finding that carries **REPAIRED** is fixed at the current HEAD. The mark
+names the commit that repairs it. The words "this commit" mean a repair in
+the documentation itself, in the commit that holds these words.
+
 ## The correction that matters
 
 The review attacked claims about CSS Modules, SCSS, Tailwind, CSS-in-JS,
@@ -82,6 +86,9 @@ It measures the count of matched rules, not the trust in the source position.
 `docs/PIPELINE.md:82` say the opposite. `low` appears in the type and in the
 docs, and in no code path.
 
+**REPAIRED in `48ae99d`.** `recordFrom` sets `low` when the live record or the
+source file is absent.
+
 ### 6. The join is asymmetric
 
 The compiler records every non-`data-` expression attribute
@@ -136,6 +143,12 @@ is no retry loop. `TaskState` has no `unchecked` member, although
 
 `:125-127` declares `propagate` and `viewports`, read by nothing.
 
+**REPAIRED in `cde8769`.** The `Evidence` type now holds `typecheckOk`,
+`lintOk`, and `diff`. The type check command is required, and the constructor
+of `AgentRunner` throws when the command is empty. The lint reports null when
+it does not run. `maxTries` drives a real retry loop, and `TaskState` holds
+`unchecked`. (`propagate` and `viewports` are still written and not read.)
+
 ### 11. `?token=` is never checked
 
 `extension/src/config.ts:11` says the companion checks the token on every
@@ -150,12 +163,18 @@ message. `index-service/src/index.ts:170-179` creates the server and
 makes the CDP call reject, and the mark then produces no record, no task, and
 not even the protocol's `{ kind: 'error' }`.
 
+**REPAIRED in `48ae99d`.** The `mark` handler catches a rejected `acceptMark`
+call and broadcasts `{ kind: 'error' }`.
+
 ### 13. The worktree is `HEAD`, not the stamped tree
 
 `agent-runner/src/index.ts:73` uses `git worktree add dir HEAD`.
 `Task.commit` is written at `index-service/src/index.ts:101` and read nowhere.
 The plugin has no mode gate, so the marked source can be an uncommitted HMR
 state. **The agent then repairs a different file than the one the user sees.**
+
+**REPAIRED in `cde8769`.** `makeWorktree` uses `task.commit`. It falls back to
+`HEAD` when the task holds no commit.
 
 ### 14. `inst` is not node identity
 
@@ -171,9 +190,9 @@ rendered node".
 |---|---|
 | Two line bases, `+1` in one path and raw in the other | `style-resolver/src/index.ts:65` vs `:131` |
 | `specificity` counts `::before` and `:where()` as classes | `style-resolver/src/index.ts:49-53` |
-| `ARCHITECTURE.md:24` lists `data-inst` as a build stamp. Only `register.ts:18` writes it | `docs/ARCHITECTURE.md:24` |
+| `ARCHITECTURE.md:24` lists `data-inst` as a build stamp. Only `register.ts:18` writes it. **REPAIRED in this commit.** The architecture page now names the writer of each attribute | `docs/ARCHITECTURE.md:24` |
 | `types.ts:71` documents `origin: 'author'`. Raw CDP gives `'regular'` | `shared/src/types.ts:71` |
-| `recordFrom` says "does not read the page again", false once wired | `index-service/src/index.ts:62-66` |
+| `recordFrom` says "does not read the page again", false once wired. **REPAIRED in `48ae99d`.** | `index-service/src/index.ts:62-66` |
 | `tabId` and `frameId` are dropped at the one place they exist | `extension/entrypoints/background.ts:217,233` |
 | A queued mark holds no timestamp, project, or document identity | `extension/entrypoints/background.ts:68-75` |
 
@@ -181,9 +200,11 @@ rendered node".
 
 ### D5 — there is no picture check
 
-There is no screenshot step by decision. **So the check has no carrier.**
-Finding 10 is what remains: a type check and a lint, and both default to pass.
-The desktop-to-mobile requirement has no carrier at all.
+There is no screenshot step by decision. **So the check has no carrier for the
+picture.** The check is a type check and a lint. **The false pass is repaired
+in `cde8769`:** the type check must run, the lint reports null when it does not
+run, and the diff is the evidence. The desktop-to-mobile requirement has no
+carrier at all.
 
 ### D6 — "Development only" is not enforced
 
@@ -201,8 +222,8 @@ condition. **The stamp and the client both ship to production.** Finding 9.
 | C1 — the framework ends at the build | Holds for React with Vite. The SWC and Turbopack trap is real for a future framework, not a defect today. |
 | C2 — one CSSOM reader serves every styling system | The mechanism is right. The code cannot feed it (findings 1 to 4). |
 | C3 — the lane needs no detector | The decider is fine. **Its inputs do not exist.** |
-| C4 — the mark carries the whole selection | True, and it carries **no address**. The companion cannot act on it. |
+| C4 — the mark carries the whole selection | True, and it carries **no CDP address**. The style callback cannot use it. The repair loop does not need the address. |
 | C5 — anchor on the source position, not a DOM selector | Holds. The `.map()` case is a stated trade-off at `docs/DESIGN.md:10-11`, not a defect. |
 | C6 — the record joins two sides | Works for `className`. Asymmetric for everything else. |
 | C7 — one writer for each tree | Holds. |
-| C8 — the repair is checked | **False.** Type check and lint remain, and both default to pass. |
+| C8 — the repair is checked | **Partly. REPAIRED in `cde8769` for the false pass.** The type check must run. The lint reports null when it does not run. The diff is the evidence. Read `docs/AGENT.md`. |

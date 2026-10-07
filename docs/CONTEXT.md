@@ -20,16 +20,19 @@ problems start from the same knowledge.
 
 ## When
 
-At project init, before the first repair agent.
+The companion reads the saved context at start. It makes no context at start.
 
-The context pass runs one time. The user can run it again by hand. The tool runs
-it again when the tree has moved too far from the recorded commit.
+The user presses **Make the context again** in the side panel, and the pass
+runs one time. The panel sends `{ kind: 'recontext' }`. The companion then
+calls `makeContext` and writes the two files.
+
+A stale context does not block a repair. The panel shows the stale mark.
 
 ## The budget
 
 | Limit | Value |
 |---|---|
-| Model calls | 1 |
+| Model calls for one pass | 1 |
 | The answer | under 1500 tokens |
 | The input | a sample of the project, not the whole repository |
 
@@ -38,17 +41,20 @@ multiplies the cost of every repair.
 
 ## What goes in
 
-The context pass reads a sample. It does not read the whole repository.
+`readSample` in `packages/context/src/sample.ts` reads the sample. It does not
+read the whole repository.
 
 | Input | Limit |
 |---|---|
-| The file tree | depth 3, no `node_modules`, no `dist` |
+| The file tree | depth 3. It skips `node_modules`, `dist`, `.output`, `.git`, `.wxt`, and `.browsagent` |
 | `package.json` | every file, workspace members included |
-| The config files | `vite.config.*`, `next.config.*`, `tsconfig.json`, the styling config |
-| The entry points | 1 or 2 files |
-| The route files | the first 10 |
-| The API calls | the result of a search for `fetch(`, `axios`, and `/api/` |
-| The existing context | the last version, when it exists |
+| The config files | `vite.config.*`, `next.config.*`, `tsconfig.json`, `tailwind.config.*`, `postcss.config.*` |
+| The entry points | `src/main.*`, `src/App.*`, `app/page.*`, and `pages/index.*` |
+| The route files | the first 10 files below a `routes`, `app`, or `pages` directory |
+| The API calls | the lines that match `fetch(`, `axios`, or `/api/` in `packages/` and `examples/` |
+
+The pass does not read the last context. It writes a new document from the
+sample.
 
 ## What comes out
 
@@ -116,8 +122,9 @@ system   the project context
 user     the task: the record and the problem
 ```
 
-The first message never changes. The second message changes only when the
-context is made again. **Only the third message is different for each repair.**
+The second message is absent when the companion holds no context. The first
+message never changes. The second message changes only when the context is
+made again. **Only the third message is different for each repair.**
 
 So a repair costs the tokens of the context one time, not one time for each
 agent.
@@ -204,7 +211,7 @@ a value wins.
 | Order | Source |
 |---|---|
 | 1 | the environment |
-| 2 | `~/.browsagent/config.json` |
+| 2 | `<project>/.browsagent/config.json` |
 | 3 | `~/.pi/agent/auth.json`, the pi provider store |
 
 The third source is a convenience. A user of pi already keeps an OpenRouter key
@@ -219,8 +226,8 @@ BROWSAGENT_MODEL_CHEAP
 
 The environment wins over both files.
 
-A file in the home directory is better than a file in the project, because a
-file in the project can reach the repository by accident.
+`.browsagent/` is in the ignore list of this project. Keep the project file
+out of the repository.
 
 ### The report
 
@@ -230,6 +237,6 @@ The panel shows one of three states:
 |---|---|
 | `no key` | No key is set. Repairs are off. |
 | `key set` | A key is set. The panel shows the base and the model |
-| `key bad` | The provider gave an error. The panel shows the code |
+| `key bad` | The provider refused the key. The panel shows the words of the fault |
 
 The panel never shows the key.

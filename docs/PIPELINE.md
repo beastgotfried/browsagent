@@ -13,35 +13,54 @@ of the next phase.
 
 ## PHASE 1: PREPARE
 
-**Actor:** the context pass, the build plugin, and the server.
-**Trigger:** the project init, then each development server start.
+**Actor:** the context pass, the build plugin, and the companion.
+**Trigger:** the user asks for the context. Then each development server start
+makes the stamp.
 **Output:** the project context, then the index.
 
 ### Part A: the project context
 
-This part runs one time, at the project init. It runs again when the tree has
-moved too far from the recorded commit. Read `docs/CONTEXT.md`.
+The code lives in `@browsagent/context`.
 
-1. The tool reads a sample of the project: the tree, the manifests, the config
-   files, the entry points, the route files, and the API calls.
-2. One model call makes the context. The answer is under 1500 tokens.
-3. The tool writes `.browsagent/context.md`.
-4. The tool records the commit and the token count in `.browsagent/context.json`.
-5. Every later model call gets this context with the task.
+1. `readSample` in `packages/context/src/sample.ts` reads a sample of the
+   project: the tree, the manifests, the config files, the entry points, the
+   route files, and the API calls. The sample skips `node_modules`, `dist`,
+   `.output`, `.git`, `.wxt`, and `.browsagent`.
+2. `makeContext` in `packages/context/src/make.ts` sends the sample to the
+   cheap model. The call holds one system message and one user message.
+3. `writeContext` in `packages/context/src/store.ts` writes
+   `<project>/.browsagent/context.md` and
+   `<project>/.browsagent/context.json`. The record holds the commit, the
+   model, the token count, and the time.
+4. The companion reads the saved context at start. `readContext` reads the two
+   files. `isStale` compares the recorded commit to `HEAD`.
+5. `ModelAgent.start` in `packages/agent-runner/src/agent.ts` puts the
+   document into every later model call as the second system message.
+
+The companion makes no context at start. The user presses **Make the context
+again** in the side panel. The panel sends `{ kind: 'recontext' }`. The
+companion calls the `onContext` hook in `packages/cli/src/index.ts`, and the
+hook calls `makeContext`.
+
+A stale context does not block a repair. The panel shows the stale mark.
 
 ### Part B: the index
 
-1. The plugin reads each source file.
-
-1. The plugin reads each source file.
-2. The plugin adds a stamp to each element. The stamp holds the source position.
-3. The plugin keeps the expression text for each dynamic property.
-4. The compiler makes the served code.
-5. The client script loads in the page.
-6. The client finds each rendered node with a stamp.
-7. The client sends one record for each node to the server.
-8. The server stores all records in the index.
-9. The server marks each node as `editable: true` or `editable: false`.
+1. `stampPlugin` in `packages/vite-plugin/src/index.ts` reads each `.jsx` and
+   `.tsx` file.
+2. `jsxStamp` in `packages/vite-plugin/src/jsx-stamp.ts` adds `data-src` and
+   `data-component` to each element. It keeps the expression text of each
+   dynamic property in `data-src-expr`.
+3. The plugin adds a script tag with the path `/@browsagent/client.js` to the
+   page.
+4. `readStamp` and `readRecord` in `packages/client/src/register.ts` read one
+   node. The content script uses both at the mark.
+5. `collectStamps`, `collectRecords`, and the `{ kind: 'register' }` message
+   are the whole-page path. No code serves the client script path, and no code
+   sends `register` today. The mark path does not need them: the mark carries
+   its own element.
+6. `Index` in `packages/index-service/src/store.ts` stores a `register`
+   message when one arrives.
 
 ### The context holds
 
@@ -64,9 +83,15 @@ moved too far from the recorded commit. Read `docs/CONTEXT.md`.
 
 ### Failure points
 
-- The project has no plugin. Then no stamp exists.
+- The plugin has no `apply: 'serve'` gate. The stamp also goes into the
+  production build. Read finding 9 in `docs/REVIEW.md`.
+- The plugin reads only `.jsx` and `.tsx` files. A `.js` or `.ts` module gets
+  no stamp. Read finding 8.
+- A component root inside a fragment, or a component in `memo` or
+  `forwardRef`, gets no `data-component`. Read finding 7.
 - The node comes from `node_modules`. Then `editable: false`.
-- HMR changes the module. Then the server refreshes the index.
+- The page loads no client script. Then no `register` message exists. The
+  mark still works.
 
 ---
 
@@ -78,18 +103,33 @@ moved too far from the recorded commit. Read `docs/CONTEXT.md`.
 
 ### Steps
 
-1. The overlay finds the element below the pointer.
-2. The client reads the stamp from that element.
-3. The client reads the live value. Example: the final class list.
-4. The client reads the current state. Example: hover or open.
-5. The client asks the server for the style data.
-6. The server gets the style data with the Chrome DevTools Protocol.
-7. The server finds the winning rule and its source position.
-8. The server finds all other use sites of the component.
-9. The tool joins all data into one record.
-10. The tool gives the record a confidence value.
-11. The user writes the problem in the panel.
-12. The tool makes a structured task.
+1. `Overlay` in `packages/client/src/overlay.ts` finds the element below the
+   pointer. The content script calls `select` in
+   `packages/extension/entrypoints/content.ts`.
+2. `select` reads the static stamp with `readStamp` and the live value with
+   `readRecord`. Both functions live in `packages/client/src/register.ts`.
+3. The node can hold no stamp. Example: a node from a third-party script. Then
+   `select` asks the MAIN-world bridge in
+   `packages/extension/entrypoints/bridge.content.ts` for the React source.
+4. The content script sends `{ kind: 'selected', selection }` to the worker.
+5. The worker sends `{ kind: 'mark', selection, problem: null }` in
+   `packages/extension/entrypoints/background.ts`. The companion answers with
+   the record.
+6. The side panel shows the record and the problem form. The user picks the
+   kind and writes the problem. The panel sends
+   `{ kind: 'send-mark', selection, problem }` to the worker.
+7. The worker sends the mark with the problem.
+   `IndexService.acceptMark` in `packages/index-service/src/index.ts` calls
+   `recordFrom`. `recordFrom` joins the stamp and the live record into one
+   `ElementRecord`.
+8. `recordFrom` asks the `styles` and the `useSites` callbacks for the style
+   rules and the use sites. The CLI sets neither callback, so a live record
+   holds `styles: []` and `useSites: []`. The confidence value is `low` when
+   the live record or the source file is absent, `high` when the style
+   callback gives rules, and `medium` in the other cases.
+9. `makeTask` makes the structured task. `TaskStore.put` stores it. The
+   companion sends `{ kind: 'task' }` to every client.
+10. `GET /tasks` returns every task.
 
 ### The record holds
 
@@ -104,31 +144,58 @@ moved too far from the recorded commit. Read `docs/CONTEXT.md`.
 
 ### Failure points
 
-- The node has no stamp. Then the confidence value is low.
-- The node is `editable: false`. Then the tool asks the user.
-- Two use sites are possible. Then the tool asks the user.
+- The node has no stamp, and the bridge finds no source. Then the content
+  script sends `{ kind: 'error', message: 'This element has no source stamp.' }`.
+- The node is `editable: false`. The record says so. The tool does not block
+  the mark.
+- Two use sites are possible. The record holds all of them. The tool does not
+  ask the user.
 
 ---
 
 ## PHASE 3: REPAIR
 
-**Actor:** one or more agents and the manager.
-**Trigger:** the task enters the queue.
+**Actor:** one agent and the companion.
+**Trigger:** the task enters the store.
 **Output:** a repair with a diff and a check result.
 
 ### Steps
 
-1. The manager makes one worktree for the task, at the commit of the mark. The
-   manager uses `HEAD` when the task holds no commit.
-2. The manager reads the project context. It reports a stale context.
-3. The agent gets the project context and the task record.
-4. The agent does not search the repository.
-5. The agent makes a short plan.
-6. The panel shows the plan. The user can agree or change it.
-7. The agent changes the smallest expression.
-8. The type check runs. The lint runs when the project has a lint command.
-9. The panel shows the diff and the cost.
-10. The user agrees or rejects the repair.
+1. `IndexService.acceptMark` puts the task in the store and gives it to the
+   `onTask` hook in `packages/cli/src/index.ts`.
+2. `onTask` calls `AgentRunner.run` in `packages/agent-runner/src/index.ts`.
+3. `AgentRunner.makeWorktree` makes one worktree for the task. The tree uses
+   the commit of the mark. The runner uses `HEAD` when the task holds no
+   commit. The worktree lives in
+   `<project>/.browsagent/worktrees/<first 8 characters of the task id>`.
+4. `ModelAgent.plan` in `packages/agent-runner/src/agent.ts` asks the model
+   for a short plan and the files. This call holds no tools.
+5. `ModelAgent.edit` runs the tool loop. The agent reads and writes files in
+   the worktree with the three tools in
+   `packages/agent-runner/src/tools.ts`. Read `docs/AGENT.md`.
+6. `AgentRunner.checkCode` runs the type check. It runs the lint only when a
+   lint command is set. The type check is required: the constructor of
+   `AgentRunner` throws when the command is empty.
+7. The loop runs the edit again while a gate that ran failed and the try count
+   is under `maxTries`. The CLI sets 3 tries. `Task.tries` counts the tries.
+8. `AgentRunner.run` returns the plan, the state, the evidence, and a diff
+   value from the words of the agent.
+9. `onTask` reads the diff of the worktree with `worktreeDiff` in
+   `packages/agent-runner/src/accept.ts`. It writes the state, the plan, the
+   files, the diff, and the evidence into the task.
+10. The companion stores the changed task and sends it to every client. The
+    side panel shows the state, the diff, and the **Accept the repair**
+    button.
+11. The user accepts. The panel sends `{ kind: 'accept', taskId }`. The
+    companion calls the `onAccept` hook. `acceptDiff` in
+    `packages/agent-runner/src/accept.ts` applies the patch to the working tree
+    with `git apply --check` and then `git apply`. `onAccept` removes the
+    worktree. The tool makes no commit and no branch.
+
+The task holds the plan and the files. The side panel does not show the plan.
+There is no agreement step.
+
+Several repairs can run at the same time. Each task gets one worktree.
 
 ### The prompt for each agent
 
@@ -138,19 +205,23 @@ system   the project context
 user     the task: the record and the problem
 ```
 
-Several agents can run at the same time. Each agent gets the same two system
-messages and one different task.
+The second message is absent when the companion holds no context.
+`ModelAgent.start` builds the messages. The plan call adds one question to the
+user message.
 
 ### Failure points
 
-- The type check fails. Then the agent tries again. The manager stops the task
-  after 3 tries.
-- Two agents change the same file. Then the merge step finds the conflict.
+- The type check fails. Then the agent tries again. The runner stops the task
+  after `maxTries` tries (3 in the CLI).
+- The agent throws a fault. Then the state is `failed`.
+- The type check command does not start. Then no gate ran, and the state is
+  `unchecked`.
+- Two agents change the same file. Each worktree is separate. The second
+  accept fails at `git apply --check`, because the working tree moved.
 - The project has no lint. Then the lint does not run. The evidence reports
   `lintOk: null`. The tool does not report a pass for a gate that did not run.
-- No gate can run. Then the agent reports the state `unchecked`.
-- The context is stale. Then the tool asks the user. It does not use the context
-  without a report.
+- The context is stale. Then the panel shows the stale mark. The repair still
+  runs: the context is a guard, not a gate.
 
 ### What the check is
 
@@ -158,8 +229,9 @@ The check is the type check and the lint. The type check is required. The lint
 is optional, because a project can have no lint. A gate that did not run
 reports null. It never reports a pass.
 
-The state names the result: `done` when every gate that ran passed, `failed`
-when a gate failed after the last try, and `unchecked` when no gate ran.
+The state names the result: `done` when the agent made an edit and every gate
+that ran passed, `failed` when a gate failed after the last try or the agent
+threw a fault, and `unchecked` when no gate ran.
 
 There is no screenshot step and no comparison at a screen width.
 
@@ -167,5 +239,3 @@ There is no screenshot step and no comparison at a screen width.
 pass for a wrong colour, a wrong width, and the right edit on the wrong
 element. The diff is the only evidence that the repair is correct. The user
 reads the diff.
-
-Read `docs/REVIEW.md` for the finding.
