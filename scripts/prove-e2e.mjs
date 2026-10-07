@@ -2,15 +2,23 @@
 /**
  * prove-e2e.mjs — prove the whole path with one command and no browser.
  *
- * The script does eight steps:
- * 1. Start the companion as a child process. Wait for the port.
- * 2. Open one websocket to the companion.
- * 3. Send one hello message. Wait for the answer.
- * 4. Send one mark. The mark holds a real problem and a real selection.
- * 5. Wait for the task. Print the state and the diff.
- * 6. Send one accept message when the diff is not empty.
- * 7. Print PASS or FAIL for each step.
- * 8. Stop the child process on every path. Exit with the right code.
+ * The script prints one PASS or FAIL line for each of these eight steps:
+ * 1. companion starts. Start the companion as a child process. Wait for
+ *    the port.
+ * 2. websocket opens. Open one websocket to the companion.
+ * 3. hello answered. Send one hello message. Wait for the answer.
+ * 4. mark with a real problem. Send one mark. The mark holds a real
+ *    problem and a real selection.
+ * 5. task arrives. Wait for the task. Report its state.
+ * 6. the repair diff arrives. Wait for the repair. Print the diff and the
+ *    task evidence.
+ * 7. accept applies the patch. Send one accept message. Check the applied
+ *    patch.
+ * 8. companion stops. Stop the child process on every path. Exit with the
+ *    right code.
+ *
+ * The accept step writes the patch into the tree. The script records the
+ * files of the patch before the accept and reverts them on every exit path.
  *
  * The script uses the node builtins and the `ws` package that the
  * index-service already installs. The root package does not depend on `ws`,
@@ -21,8 +29,9 @@
  * redaction function first.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,12 +42,22 @@ const serviceRequire = createRequire(resolve(root, 'packages/index-service/packa
 const { WebSocket } = serviceRequire('ws');
 
 const HOST = '127.0.0.1';
-const PORT = 4517;
+// The proof asks the system for a free port at start. The child process and
+// the websocket then use the same value. Two proofs do not fight for one port.
+let port = 0;
 // The companion refuses a caller without the shared token. The script holds
 // the same value in the environment of the child process.
 const TOKEN = 'proof-token';
-const STATE_URL = `http://${HOST}:${PORT}/state?token=${TOKEN}`;
-const SOCKET_URL = `ws://${HOST}:${PORT}/mark?token=${TOKEN}`;
+
+/** The state URL of the companion. It uses the free port of this run. */
+function stateUrl() {
+  return `http://${HOST}:${port}/state?token=${TOKEN}`;
+}
+
+/** The websocket URL of the companion. It uses the same port. */
+function socketUrl() {
+  return `ws://${HOST}:${port}/mark?token=${TOKEN}`;
+}
 
 const PORT_TIMEOUT_MS = 30_000;
 const SOCKET_TIMEOUT_MS = 10_000;
@@ -98,6 +117,9 @@ let exitPromise = Promise.resolve(false);
 let socket = null;
 let task = null;
 let accepted = null;
+// The content of every file that the accepted patch touches. Null until the
+// accept step records it.
+let treeSaved = null;
 let childPending = '';
 const childTail = [];
 const inbox = [];
@@ -125,10 +147,25 @@ function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+/** Ask the system for one free port. The proof owns the port for one run. */
+async function freePort() {
+  const probe = createServer();
+  const chosen = await new Promise((resolveListen, rejectListen) => {
+    probe.once('error', rejectListen);
+    probe.listen(0, HOST, () => {
+      const address = probe.address();
+      resolveListen(address === null || typeof address === 'string' ? 0 : address.port);
+    });
+  });
+  await new Promise((resolveClose) => probe.close(() => resolveClose()));
+  if (chosen === 0) throw new Error('The script found no free port.');
+  return chosen;
+}
+
 /** Read GET /state. Return null when the companion does not answer. */
 async function readState() {
   try {
-    const response = await fetch(STATE_URL);
+    const response = await fetch(stateUrl());
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -216,7 +253,7 @@ function startCompanion() {
     cwd: root,
     env: {
       ...process.env,
-      BROWSAGENT_PORT: String(PORT),
+      BROWSAGENT_PORT: String(port),
       BROWSAGENT_TOKEN: TOKEN,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -268,18 +305,18 @@ async function waitForPort() {
       // A foreign process on the port kills the child with EADDRINUSE.
       await sleep(300);
       if (exitInfo !== null) {
-        throw new Error(`The port ${PORT} is held by another process. ${exitWords()}`);
+        throw new Error(`The port ${port} is held by another process. ${exitWords()}`);
       }
       return state;
     }
     await sleep(250);
   }
-  throw new Error(`The port ${PORT} gave no answer in ${PORT_TIMEOUT_MS / 1000} seconds.`);
+  throw new Error(`The port ${port} gave no answer in ${PORT_TIMEOUT_MS / 1000} seconds.`);
 }
 
 function openSocket() {
   return new Promise((resolveOpen, rejectOpen) => {
-    socket = new WebSocket(SOCKET_URL);
+    socket = new WebSocket(socketUrl());
     socket.on('message', (data) => onSocketMessage(String(data)));
     socket.on('close', () => {
       for (const waiter of waiters.splice(0)) {
@@ -398,7 +435,7 @@ async function stopCompanion() {
     }
   }
 
-  if (child === null) return { ok: true, detail: 'the companion did not start' };
+  if (child === null) return { ok: false, detail: 'the companion never started' };
   if (exitInfo !== null) return { ok: true, detail: exitWords() };
 
   child.kill('SIGTERM');
@@ -409,6 +446,42 @@ async function stopCompanion() {
   }
   if (exitInfo === null) return { ok: false, detail: 'the companion did not stop' };
   return { ok: true, detail: exitWords() };
+}
+
+/**
+ * Record the content of every file that the patch touches.
+ *
+ * The accept step writes the patch into the repository root. A file that is
+ * absent now is a file that the patch makes; null records that fact.
+ */
+function recordFiles(paths) {
+  const saved = new Map();
+  for (const name of paths) {
+    const full = resolve(root, name);
+    saved.set(name, existsSync(full) ? readFileSync(full) : null);
+  }
+  return saved;
+}
+
+/**
+ * Put every recorded file back. Remove a file that the patch made.
+ *
+ * This runs in the finally block of main and in the signal handlers, so the
+ * proof reverts the write on every exit path. The function runs one time
+ * only. A second run of the proof then finds the tree as the first run did.
+ */
+function restoreFiles() {
+  const saved = treeSaved;
+  if (saved === null) return;
+  treeSaved = null;
+  for (const [name, content] of saved) {
+    const full = resolve(root, name);
+    if (content === null) {
+      if (existsSync(full)) rmSync(full, { force: true });
+      continue;
+    }
+    writeFileSync(full, content);
+  }
 }
 
 const steps = [
@@ -424,7 +497,7 @@ const steps = [
       const state = await waitForPort();
       const provider = state.provider ?? null;
       const parts = [
-        `port ${PORT}`,
+        `port ${port}`,
         `provider ${provider?.status ?? 'unknown'}`,
         contextWords(state.context),
       ];
@@ -446,7 +519,7 @@ const steps = [
       if (welcome.kind === 'error') {
         throw new Error(`The companion refused the socket. ${welcome.message}`);
       }
-      return `ws://${HOST}:${PORT}/mark, indexed count ${welcome.count}`;
+      return `ws://${HOST}:${port}/mark, indexed count ${welcome.count}`;
     },
   },
   {
@@ -503,6 +576,9 @@ const steps = [
   {
     title: TITLES[6],
     run: async () => {
+      // Record the files of the patch before the accept. The tool writes them
+      // into the repository root, and the finally block puts them back.
+      treeSaved = recordFiles(diffFiles(task.diff));
       send({ kind: 'accept', taskId: task.id });
       const answer = await waitForMessage(
         (message) => message.kind === 'accepted' || message.kind === 'error',
@@ -532,34 +608,44 @@ async function main() {
   console.log('');
 
   let failure = null;
-  for (let at = 0; at < steps.length; at += 1) {
-    const step = steps[at];
-    if (failure !== null) {
-      report(at + 1, step.title, 'SKIP', 'an earlier step failed');
-      continue;
-    }
-    try {
-      const detail = await step.run();
-      report(at + 1, step.title, 'PASS', detail);
-      if (step.after !== undefined) step.after();
-    } catch (error) {
-      failure = error;
-      report(at + 1, step.title, 'FAIL', words(error));
-    }
-  }
+  try {
+    // Choose the port before the companion starts. Two proofs can then run
+    // at the same time.
+    port = await freePort();
 
-  const stopped = await stopCompanion();
-  const stopNumber = TITLES.length;
-  report(stopNumber, TITLES[stopNumber - 1], stopped.ok ? 'PASS' : 'FAIL', stopped.detail);
-  if (!stopped.ok && failure === null) failure = new Error(stopped.detail);
+    for (let at = 0; at < steps.length; at += 1) {
+      const step = steps[at];
+      if (failure !== null) {
+        report(at + 1, step.title, 'SKIP', 'an earlier step failed');
+        continue;
+      }
+      try {
+        const detail = await step.run();
+        report(at + 1, step.title, 'PASS', detail);
+        if (step.after !== undefined) step.after();
+      } catch (error) {
+        failure = error;
+        report(at + 1, step.title, 'FAIL', words(error));
+      }
+    }
 
-  console.log('');
-  if (failure === null) {
-    console.log('PROOF PASSED. The path works from the mark to the applied patch.');
-  } else {
-    console.log(redacted(`PROOF FAILED: ${words(failure)}`));
+    const stopped = await stopCompanion();
+    const stopNumber = TITLES.length;
+    report(stopNumber, TITLES[stopNumber - 1], stopped.ok ? 'PASS' : 'FAIL', stopped.detail);
+    if (!stopped.ok && failure === null) failure = new Error(stopped.detail);
+
+    console.log('');
+    if (failure === null) {
+      console.log('PROOF PASSED. The path works from the mark to the applied patch.');
+    } else {
+      console.log(redacted(`PROOF FAILED: ${words(failure)}`));
+    }
+    process.exitCode = failure === null ? 0 : 1;
+  } finally {
+    // The accept step writes the patch into the repository root. Put the
+    // touched files back on every path, including a throw.
+    restoreFiles();
   }
-  process.exitCode = failure === null ? 0 : 1;
 }
 
 process.on('exit', () => {
@@ -568,6 +654,8 @@ process.on('exit', () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     if (child !== null && exitInfo === null) child.kill('SIGKILL');
+    // A signal skips the finally block. Revert the accepted patch here.
+    restoreFiles();
     process.exit(130);
   });
 }
