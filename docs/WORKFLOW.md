@@ -20,12 +20,13 @@ recon     parallel     read-only scouts
 writers   SERIAL       one worker for each task, one commit and one push each
 reviews   parallel     read-only reviewers
 fix       one writer   repair the confirmed findings
-verify    one scout    read-only check of the pushed range
+verify    one scout    read-only check of the pushed range. It runs no proof
 ```
 
 The writers are **serial**. One repository has one working tree. Two writers in
 one tree overwrite each other. The read-only steps are parallel, because a read
-does not change the tree.
+does not change the tree. The verify step runs no command that writes to the
+tree. It does not run `pnpm prove`. Read "The end-to-end proof".
 
 ## The gates
 
@@ -38,6 +39,22 @@ pnpm -r build
 
 A gate failure stops the writer. The writer reports the failure and makes no
 commit.
+
+## The end-to-end proof
+
+`pnpm prove` runs `scripts/prove-e2e.mjs`. The proof starts the companion as a
+child process, opens one websocket, sends one mark, waits for the repair, and
+accepts the patch. It prints PASS or FAIL for each of its eight steps.
+
+The proof is not a gate. It needs a built tree and a provider key. It makes
+live model calls. It binds one local port for one run. The accept step writes
+the patch into the working tree, and the script puts the touched files back
+when it ends, and on SIGINT or SIGTERM.
+
+**The verify step does not run `pnpm prove`.** The verify step is read-only,
+and the proof writes to the tree. A writing step may run the proof. To run the
+proof beside a verify step, use a separate copy of the repository. Run
+`git status --short` after the proof in every case.
 
 ## The task list
 

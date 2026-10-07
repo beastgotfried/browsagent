@@ -8,7 +8,7 @@
 //   writers   SERIAL       one worker per task, each makes one commit and pushes
 //   reviews   parallel     read-only reviewers
 //   fix       one writer   one worker repairs the confirmed findings
-//   verify    one scout    read-only check of the pushed range
+//   verify    one scout    read-only check of the pushed range (no pnpm prove)
 //
 // The writers are serial because one repository has one working tree. Two
 // writers in one tree overwrite each other.
@@ -182,8 +182,12 @@ function verifyTask() {
     "   The output MUST be empty.",
     "3. Run each gate:",
     GATES.map(function (gate) { return "     " + gate; }).join("\n"),
-    "4. Report any file that the work touched but did not need to touch.",
-    "5. Report any claim in a commit message that the code does not support.",
+    "4. Do NOT run pnpm prove. The accept step of that proof writes the",
+    "   patch into the tree, so the proof is not read-only work. Run it",
+    "   only in a separate copy of the repository. Run git status --short",
+    "   after the proof in every case.",
+    "5. Report any file that the work touched but did not need to touch.",
+    "6. Report any claim in a commit message that the code does not support.",
     "",
     "Give the exact command output for each step."
   ].join("\n");

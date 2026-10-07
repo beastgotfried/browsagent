@@ -18,7 +18,10 @@
  *    right code.
  *
  * The accept step writes the patch into the tree. The script records the
- * files of the patch before the accept and reverts them on every exit path.
+ * files of the patch before the accept. The finally block of main and the
+ * SIGINT and SIGTERM handlers put those files back. A SIGHUP, a SIGKILL, or
+ * a fault outside main leaves the patch in the tree. Run `git status
+ * --short` after the proof.
  *
  * The script uses the node builtins and the `ws` package that the
  * index-service already installs. The root package does not depend on `ws`,
@@ -466,9 +469,10 @@ function recordFiles(paths) {
 /**
  * Put every recorded file back. Remove a file that the patch made.
  *
- * This runs in the finally block of main and in the signal handlers, so the
- * proof reverts the write on every exit path. The function runs one time
- * only. A second run of the proof then finds the tree as the first run did.
+ * This runs in the finally block of main and in the SIGINT and SIGTERM
+ * handlers. It does not run for a SIGHUP, for a SIGKILL, or for a fault
+ * raised outside main. The function runs one time only, so every later call
+ * does nothing.
  */
 function restoreFiles() {
   const saved = treeSaved;
@@ -643,7 +647,7 @@ async function main() {
     process.exitCode = failure === null ? 0 : 1;
   } finally {
     // The accept step writes the patch into the repository root. Put the
-    // touched files back on every path, including a throw.
+    // touched files back when main ends or throws.
     restoreFiles();
   }
 }

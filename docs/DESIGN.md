@@ -24,7 +24,11 @@ A second patch fails at `git apply --check` when the tree moved.
 
 There is no screenshot step and no comparison at a screen width. The word
 "fixed" means "the type check passed, the lint passed when it ran, and the
-diff is small".
+diff is not empty". **Nothing measures the size of the diff.** A small change
+and a large change pass the same rule.
+
+`AgentRunner.run` sets the state `done` only when every gate that ran passed
+and the diff is not empty.
 
 A repair is not measured by a picture. **A repair is measured by the diff.**
 

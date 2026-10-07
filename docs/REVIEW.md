@@ -155,6 +155,10 @@ it does not run. `maxTries` drives a real retry loop, and `TaskState` holds
 message. `index-service/src/index.ts:170-179` creates the server and
 `handle` at `:131-152` never inspects a token.
 
+**REPAIRED in `547bc28`.** `tokenOk` refuses an HTTP request that does not
+hold the token, and `verifyClient` refuses a socket without it. The extension
+sends the token on the socket and on both HTTP reads.
+
 ## P2 — hygiene
 
 ### 12. A rejected resolve is silent

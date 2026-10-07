@@ -67,6 +67,7 @@ pnpm build          # build every package
 
 pnpm dev            # the companion on port 4517
 pnpm demo           # a second terminal: the page under test on port 4519
+pnpm prove          # the end-to-end proof. Read "The end-to-end proof" below
 ```
 
 Load the extension in the browser:
@@ -85,6 +86,25 @@ export BROWSAGENT_MODEL=...
 
 The companion also reads `<project>/.browsagent/config.json` and
 `~/.pi/agent/auth.json`. Read `docs/CONTEXT.md`.
+
+## The end-to-end proof
+
+`pnpm prove` runs `scripts/prove-e2e.mjs`. The script starts the companion as
+a child process, opens one websocket, sends one mark with a real problem,
+waits for the repair, and accepts the patch. It prints PASS or FAIL for each
+of its eight steps. No browser is needed.
+
+The proof needs a built tree (`pnpm build`) and a provider key. It makes live
+model calls: a plan call and one or more edit calls. The provider charges for
+them.
+
+The proof binds one local port for one run, so two proofs do not fight for
+one port.
+
+The accept step writes the patch into the working tree. The script records
+the touched files before the accept, and puts them back when it ends, and on
+SIGINT or SIGTERM. A SIGHUP or a SIGKILL can leave the patch in the tree. Run
+`git status --short` after the proof.
 
 ## The documents
 
