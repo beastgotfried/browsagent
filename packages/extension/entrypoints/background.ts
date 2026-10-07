@@ -204,6 +204,14 @@ export default defineBackground(() => {
     if (command === 'toggle-overlay') void toggleOverlay();
   });
 
+  // The toolbar icon is the primary control. One click opens the side panel and
+  // changes the overlay state in the active tab. A click cannot conflict with a
+  // browser shortcut. The action has no popup, so onClicked fires.
+  browser.action.onClicked.addListener((tab) => {
+    void browser.sidePanel.open({ windowId: tab.windowId }).catch(() => undefined);
+    void toggleOverlay();
+  });
+
   browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const typed = message as ToBackground;
 

@@ -67,14 +67,19 @@ The worker then sends the opposite value to the tab:
 A `true` value starts the overlay. A `false` value stops the overlay. The
 content script obeys the value.
 
-The worker accepts a request for a change in one of two ways:
+The worker accepts a request for a change in one of three ways:
 
-1. The `toggle-overlay` command. The suggested key is `Ctrl+Shift+M`
-   (`Command+Shift+M` on macOS).
-2. A `{ kind: 'toggle-overlay' }` message.
+1. A click on the toolbar icon. This is the primary control. One click opens
+   the side panel and changes the overlay state. A click cannot conflict with a
+   browser shortcut.
+2. The `toggle-overlay` command. The suggested key is `Ctrl+Shift+E`
+   (`Command+Shift+E` on macOS).
+3. A `{ kind: 'toggle-overlay' }` message.
 
-Only the command is wired in the interface. The side panel does not send the
-message yet.
+Do not use `Command+Shift+M`. It is the Chrome profile switcher on macOS.
+The user can change the key at `chrome://extensions/shortcuts`.
+
+The side panel does not send the message yet.
 
 The worker reads the live state before each change. Therefore a worker
 restart, a page load, or an Escape press cannot make the two sides disagree.

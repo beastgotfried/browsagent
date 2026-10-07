@@ -40,9 +40,12 @@ export default defineConfig({
 
     commands: {
       'toggle-overlay': {
+        // Cmd+Shift+M is the Chrome profile switcher on macOS. Do not use it.
+        // Cmd+Shift+E is not a Chrome default. The user can change any bind at
+        // chrome://extensions/shortcuts.
         suggested_key: {
-          default: 'Ctrl+Shift+M',
-          mac: 'Command+Shift+M',
+          default: 'Ctrl+Shift+E',
+          mac: 'Command+Shift+E',
         },
         description: 'Toggle the element-selection overlay',
       },
