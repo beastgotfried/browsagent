@@ -15,7 +15,10 @@
     "dev": "node ./dist/index.js"
   },
   "dependencies": {
+    "@browsagent/agent-runner": "workspace:*",
+    "@browsagent/context": "workspace:*",
     "@browsagent/index-service": "workspace:*",
+    "@browsagent/model": "workspace:*",
     "@browsagent/shared": "workspace:*"
   },
   "devDependencies": {

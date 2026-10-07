@@ -216,9 +216,18 @@ importers:
 
   packages/cli:
     dependencies:
+      '@browsagent/agent-runner':
+        specifier: workspace:*
+        version: link:../agent-runner
+      '@browsagent/context':
+        specifier: workspace:*
+        version: link:../context
       '@browsagent/index-service':
         specifier: workspace:*
         version: link:../index-service
+      '@browsagent/model':
+        specifier: workspace:*
+        version: link:../model
       '@browsagent/shared':
         specifier: workspace:*
         version: link:../shared
