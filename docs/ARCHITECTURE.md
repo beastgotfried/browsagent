@@ -122,11 +122,16 @@ served code  ->  page  ->  [client]  register the live data
     |               .browsagent/context.md
     |                        |
     v                        v
-                 [agent-runner]  worktree, agent, check
+                 [agent-runner]  worktree, agent, type check, lint
                                  |
                                  v
                             [panel]  the result
 ```
+
+The runner makes one worktree for each task. The worktree uses the commit of
+the mark. The runner runs the type check and the optional lint after each
+agent edit. A gate that did not run reports null, and it never reports a pass.
+Read `docs/PIPELINE.md`.
 
 ## The rule for the agent
 

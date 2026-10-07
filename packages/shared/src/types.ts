@@ -151,21 +151,19 @@ export type TaskState =
   | 'working'
   | 'waiting'
   | 'verifying'
+  | 'unchecked'
   | 'done'
   | 'failed'
   | 'rejected';
 
 /** The check result of one task. */
 export interface Evidence {
-  /** The picture paths before the repair. */
-  before: string[];
-  /** The picture paths after the repair. */
-  after: string[];
-  accessOk: boolean;
+  /** True when the type check passed. The type check is a required gate. */
   typecheckOk: boolean;
-  lintOk: boolean;
-  /** True if the pixels got worse at a screen width. */
-  regression: boolean;
+  /** True when the lint passed. Null when the lint did not run. */
+  lintOk: boolean | null;
+  /** The diff of the repair. The user reads this diff. */
+  diff: string;
 }
 
 /** One task for one agent. */

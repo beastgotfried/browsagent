@@ -10,6 +10,7 @@ const STATE_ORDER: Record<Task['state'], number> = {
   failed: 4,
   rejected: 5,
   done: 6,
+  unchecked: 7,
 };
 
 function stateLabel(state: Task['state']): string {
@@ -88,8 +89,8 @@ export function App(): JSX.Element {
             {task.evidence ? (
               <p className="card__row">
                 typecheck: {String(task.evidence.typecheckOk)} | lint:{' '}
-                {String(task.evidence.lintOk)} | regression:{' '}
-                {String(task.evidence.regression)}
+                {task.evidence.lintOk === null ? 'not run' : String(task.evidence.lintOk)}
+                {' | '}diff: {task.evidence.diff === '' ? 'none' : 'present'}
               </p>
             ) : null}
           </li>

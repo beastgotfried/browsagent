@@ -118,14 +118,15 @@ moved too far from the recorded commit. Read `docs/CONTEXT.md`.
 
 ### Steps
 
-1. The manager makes one worktree for the task.
+1. The manager makes one worktree for the task, at the commit of the mark. The
+   manager uses `HEAD` when the task holds no commit.
 2. The manager reads the project context. It reports a stale context.
 3. The agent gets the project context and the task record.
 4. The agent does not search the repository.
 5. The agent makes a short plan.
 6. The panel shows the plan. The user can agree or change it.
 7. The agent changes the smallest expression.
-8. The type check and the lint run.
+8. The type check runs. The lint runs when the project has a lint command.
 9. The panel shows the diff and the cost.
 10. The user agrees or rejects the repair.
 
@@ -145,14 +146,22 @@ messages and one different task.
 - The type check fails. Then the agent tries again. The manager stops the task
   after 3 tries.
 - Two agents change the same file. Then the merge step finds the conflict.
-- The agent cannot check the result. Then the agent reports `unchecked`.
+- The project has no lint. Then the lint does not run. The evidence reports
+  `lintOk: null`. The tool does not report a pass for a gate that did not run.
+- No gate can run. Then the agent reports the state `unchecked`.
 - The context is stale. Then the tool asks the user. It does not use the context
   without a report.
 
 ### What the check is
 
-The check is the type check and the lint. There is no screenshot step and no
-comparison at a screen width.
+The check is the type check and the lint. The type check is required. The lint
+is optional, because a project can have no lint. A gate that did not run
+reports null. It never reports a pass.
+
+The state names the result: `done` when every gate that ran passed, `failed`
+when a gate failed after the last try, and `unchecked` when no gate ran.
+
+There is no screenshot step and no comparison at a screen width.
 
 **A type check and a lint cannot tell a correct repair from a wrong one.** Both
 pass for a wrong colour, a wrong width, and the right edit on the wrong
