@@ -7,6 +7,7 @@ export type {
   ProblemType,
   PropagateMode,
   RuntimeRecord,
+  Selection,
   Severity,
   SourcePosition,
   StaticStamp,

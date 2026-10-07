@@ -172,3 +172,17 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * One marked element. The extension sends this to the companion.
+ *
+ * The stamp holds the static data. The compiler makes it.
+ * The record holds the live value. The client makes it.
+ * The companion joins the two sides into one ElementRecord.
+ */
+export interface Selection {
+  stamp: StaticStamp;
+  record: RuntimeRecord;
+  /** The address of the page at the time of the mark. */
+  tabUrl: string;
+}

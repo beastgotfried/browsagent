@@ -1,15 +1,12 @@
 import type {
-  RuntimeRecord,
+  ElementRecord,
+  Selection,
   SourcePosition,
-  StaticStamp,
 } from '@browsagent/shared';
 
-/** One marked element before the user writes the problem. */
-export interface Selection {
-  stamp: StaticStamp;
-  record: RuntimeRecord;
-  tabUrl: string;
-}
+// The mark shape is part of the wire protocol. The extension and the
+// companion use the same type from the shared package.
+export type { Selection };
 
 /** The messages from the content script and the panel to the worker. */
 export type ToBackground =
@@ -31,6 +28,7 @@ export type FromBackground =
   | { kind: 'overlay-query' }
   | { kind: 'status'; connected: boolean; server: string; queued: number }
   | { kind: 'selected'; selection: Selection }
+  | { kind: 'record'; record: ElementRecord }
   | { kind: 'error'; message: string };
 
 /**

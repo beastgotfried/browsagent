@@ -7,6 +7,8 @@ import {
   DEFAULT_PORT,
   type ClientToServer,
   type ElementRecord,
+  type Problem,
+  type Selection,
   type ServerToClient,
   type Task,
 } from '@browsagent/shared';
@@ -30,14 +32,17 @@ function send(socket: WebSocket, message: ServerToClient): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
 }
 
+/** The problem that the user gives before the editor exists. */
+export const NO_PROBLEM: null = null;
+
 /**
  * Phase 2 of the pipeline.
  *
  * The service does four jobs:
- * 1. It stores the stamps and the live records.
- * 2. It joins the two sides into one record.
+ * 1. It stores the stamps and the live records of a registered tab.
+ * 2. It joins the two sides of one mark into one record.
  * 3. It adds the style data and the use sites.
- * 4. It makes a structured task for the agent.
+ * 4. It makes a structured task when the mark carries a problem.
  */
 export class IndexService {
   private readonly index = new Index();
@@ -52,33 +57,32 @@ export class IndexService {
     return this.tasks;
   }
 
-  async makeRecord(inst: string): Promise<ElementRecord | null> {
-    const entry = this.index.get(inst);
-    if (!entry) return null;
-    const { stamp, record } = entry;
+  /**
+   * Join one mark into one record.
+   *
+   * The stamp is the static side. The record is the live side. The service
+   * does not read the page again. Therefore a worker restart, a dropped
+   * socket, or a page reload cannot change the result.
+   */
+  async recordFrom(selection: Selection): Promise<ElementRecord> {
+    const { stamp, record } = selection;
 
-    const styles = this.options.styles ? await this.options.styles(inst) : [];
+    const styles = this.options.styles ? await this.options.styles(stamp.inst) : [];
     const useSites = this.options.useSites
       ? await this.options.useSites(stamp.component)
       : [];
 
-    const confidence =
-      record === null ? 'low' : styles.length > 0 ? 'high' : 'medium';
+    const confidence: ElementRecord['confidence'] =
+      styles.length > 0 ? 'high' : 'medium';
 
     return {
-      inst,
+      inst: stamp.inst,
       src: stamp.src,
       component: stamp.component,
       expressions: stamp.expressions,
-      values: record?.values ?? {},
-      state: record?.state ?? {
-        hover: false,
-        focus: false,
-        active: false,
-        open: false,
-        disabled: false,
-      },
-      viewport: record?.viewport ?? { name: 'unknown', width: 0, height: 0 },
+      values: record.values,
+      state: record.state,
+      viewport: record.viewport,
       editable: stamp.editable,
       parentSrc: stamp.parentSrc,
       styles,
@@ -87,12 +91,10 @@ export class IndexService {
     };
   }
 
-  async makeTask(inst: string, problem: Task['problem']): Promise<Task | null> {
-    const record = await this.makeRecord(inst);
-    if (!record) return null;
-
+  /** Make one task for one agent. */
+  makeTask(record: ElementRecord, problem: Problem): Task {
     const now = new Date().toISOString();
-    const task: Task = {
+    return {
       id: randomUUID(),
       project: this.options.project,
       route: record.src.file,
@@ -109,8 +111,24 @@ export class IndexService {
       createdAt: now,
       updatedAt: now,
     };
+  }
+
+  /**
+   * Take one mark.
+   *
+   * A mark without a problem answers with the record. The problem editor does
+   * not exist yet. A mark with a problem answers with a task.
+   */
+  async acceptMark(
+    selection: Selection,
+    problem: Problem | null,
+  ): Promise<ServerToClient> {
+    const record = await this.recordFrom(selection);
+    if (problem === null) return { kind: 'record', record };
+
+    const task = this.makeTask(record, problem);
     this.tasks.put(task);
-    return task;
+    return { kind: 'task', task };
   }
 
   private handle(socket: WebSocket, message: ClientToServer): void {
@@ -128,12 +146,8 @@ export class IndexService {
     }
 
     if (message.kind === 'mark') {
-      void this.makeTask(message.inst, message.problem).then((task) => {
-        if (!task) {
-          send(socket, { kind: 'error', message: `no record for ${message.inst}` });
-          return;
-        }
-        for (const client of this.clients) send(client, { kind: 'task', task });
+      void this.acceptMark(message.selection, message.problem).then((answer) => {
+        for (const client of this.clients) send(client, answer);
       });
     }
   }
