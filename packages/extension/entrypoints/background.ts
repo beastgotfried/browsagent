@@ -12,6 +12,7 @@ import { getServer, getToken } from '../src/config.js';
  * 2. Reconnect when the socket closes.
  * 3. Route the messages between the content script, the panel, and the socket.
  * 4. Answer the `toggle-overlay` command.
+ * 5. Hold the overlay state of each tab.
  */
 export default defineBackground(() => {
   let socket: WebSocket | null = null;
@@ -20,6 +21,9 @@ export default defineBackground(() => {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let backoff = 1000;
   const queue: unknown[] = [];
+  // The tab ids whose overlay is on. The worker owns this state. Therefore
+  // every `overlay` message carries the next state and not a toggle.
+  const overlayTabs = new Set<number>();
 
   const toPanel = (message: FromBackground): void => {
     void browser.runtime.sendMessage(message).catch(() => undefined);
@@ -83,17 +87,28 @@ export default defineBackground(() => {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
     if (!tab?.id) return;
-    // The content script keeps its own state. Send a toggle and let it answer.
+
+    const active = !overlayTabs.has(tab.id);
+    if (active) overlayTabs.add(tab.id);
+    else overlayTabs.delete(tab.id);
+
     await browser.tabs
-      .sendMessage(tab.id, { kind: 'overlay', active: true })
+      .sendMessage(tab.id, { kind: 'overlay', active } satisfies FromBackground)
       .catch(() => undefined);
+  };
+
+  // The content script stops the overlay before it reports a selection or an
+  // error without a stamp. Forget the state of that tab.
+  const forgetOverlay = (tabId: number | undefined): void => {
+    if (tabId === undefined) return;
+    overlayTabs.delete(tabId);
   };
 
   browser.commands.onCommand.addListener((command) => {
     if (command === 'toggle-overlay') void toggleOverlay();
   });
 
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const typed = message as ToBackground;
 
     if (typed.kind === 'status') {
@@ -109,6 +124,12 @@ export default defineBackground(() => {
     if (typed.kind === 'selected') {
       const selection: Selection = typed.selection;
       send({ kind: 'mark', ...selection });
+      forgetOverlay(sender.tab?.id);
+      return true;
+    }
+
+    if (typed.kind === 'error') {
+      forgetOverlay(sender.tab?.id);
       return true;
     }
 

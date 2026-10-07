@@ -29,7 +29,12 @@ export default defineContentScript({
     };
 
     const start = (): void => {
-      if (overlay !== null) return;
+      // The overlay stops itself when the user presses Escape. Call start
+      // again. A second start and a second stop are both safe.
+      if (overlay !== null) {
+        overlay.start();
+        return;
+      }
       overlay = new Overlay({
         onSelect: (node) => {
           stop();
@@ -40,7 +45,7 @@ export default defineContentScript({
             void browser.runtime.sendMessage({
               kind: 'error',
               message: 'This element has no source stamp.',
-            } satisfies FromBackground);
+            } satisfies ToBackground);
             return;
           }
           const selection: Selection = {
@@ -57,7 +62,9 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message: unknown) => {
       const typed = message as FromBackground;
       if (typed.kind !== 'overlay') return;
-      if (overlay === null) start();
+      // The worker owns the overlay state. A true value starts the overlay and
+      // a false value stops it. This script does not toggle the overlay.
+      if (typed.active) start();
       else stop();
     });
   },

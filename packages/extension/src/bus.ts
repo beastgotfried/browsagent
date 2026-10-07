@@ -11,23 +11,16 @@ export interface Selection {
 export type ToBackground =
   | { kind: 'toggle-overlay' }
   | { kind: 'selected'; selection: Selection }
+  | { kind: 'error'; message: string }
   | { kind: 'status' };
 
-/** The messages from the worker to the content script and the panel. */
+/**
+ * The messages from the worker to the content script and the panel.
+ *
+ * The `overlay` message sets the overlay state. It does not toggle the state.
+ */
 export type FromBackground =
   | { kind: 'overlay'; active: boolean }
   | { kind: 'status'; connected: boolean; server: string; queued: number }
   | { kind: 'selected'; selection: Selection }
   | { kind: 'error'; message: string };
-
-/** True when a value has the shape of a background message. */
-export function isFromBackground(value: unknown): value is FromBackground {
-  if (typeof value !== 'object' || value === null) return false;
-  const kind = (value as { kind?: unknown }).kind;
-  return (
-    kind === 'overlay' ||
-    kind === 'status' ||
-    kind === 'selected' ||
-    kind === 'error'
-  );
-}
