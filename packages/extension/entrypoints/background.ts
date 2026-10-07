@@ -1,6 +1,8 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
+import type { ClientToServer } from '@browsagent/shared';
+
 import type { FromBackground, Selection, ToBackground } from '../src/bus.js';
 import {
   getServer,
@@ -230,7 +232,13 @@ export default defineBackground(() => {
 
     if (typed.kind === 'selected') {
       const selection: Selection = typed.selection;
-      send({ kind: 'mark', ...selection });
+      // The problem editor does not exist yet. Send a null problem. The
+      // companion answers with the record and makes no task.
+      send({
+        kind: 'mark',
+        selection,
+        problem: null,
+      } satisfies ClientToServer);
       return false;
     }
 

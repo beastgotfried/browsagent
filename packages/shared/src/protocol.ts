@@ -1,6 +1,8 @@
 import type {
   ElementRecord,
+  Problem,
   RuntimeRecord,
+  Selection,
   StaticStamp,
   Task,
 } from './types.js';
@@ -13,14 +15,29 @@ export type ClientToServer =
       route: string;
     }
   | {
+      /**
+       * Fill the index for one tab.
+       *
+       * No sender uses this message yet. It is the path for the step that
+       * needs the whole page, such as the reuse map. The mark message does not
+       * need it: the mark carries its own element.
+       */
       kind: 'register';
       stamps: StaticStamp[];
       records: RuntimeRecord[];
     }
   | {
+      /**
+       * One marked element. The message carries the stamp and the live record.
+       * The companion does not keep a copy of the page. Therefore a worker
+       * restart or a dropped socket cannot lose the data.
+       *
+       * `problem` is null while the problem editor does not exist. The
+       * companion then answers with the record and makes no task.
+       */
       kind: 'mark';
-      inst: string;
-      problem: Task['problem'];
+      selection: Selection;
+      problem: Problem | null;
     };
 
 /** The messages from the server to the client. */
@@ -35,6 +52,7 @@ export const STAMP = {
   src: 'data-src',
   expr: 'data-src-expr',
   inst: 'data-inst',
+  component: 'data-component',
 } as const;
 
 /** The default port of the index service. */

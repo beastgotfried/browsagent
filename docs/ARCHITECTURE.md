@@ -22,6 +22,12 @@ The build plugin adds these attributes in the development build:
 | `data-src` | `file:line:column` |
 | `data-src-expr` | the expression text of each dynamic property |
 | `data-inst` | the instance identity |
+| `data-component` | the name of the component that made the element |
+
+The plugin writes `data-component` on the **root** element of each component
+only. The finder walks up from the selected element to the nearest component
+root. Therefore a repair lands on the component that owns the element, and not
+on a child element inside it.
 
 The plugin knows the original position. Therefore the pipeline does not need
 source maps for the markup step.

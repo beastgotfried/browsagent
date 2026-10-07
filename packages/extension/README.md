@@ -191,15 +191,41 @@ script makes a static stamp from the answer: `expressions: {}`,
 from the node. When the answer has no source, the content script reports
 `This element has no source stamp.` It does not guess.
 
+## The mark message
+
+The worker sends one mark for each selected element:
+
+```
+{ kind: 'mark', selection, problem }
+```
+
+`selection` holds `stamp`, `record`, and `tabUrl`. The type is `Selection` in
+`@browsagent/shared`. The extension and the companion use the same type.
+
+The mark carries the whole element. The companion does not keep a copy of the
+page. Therefore a worker restart, a dropped socket, or a page reload cannot
+lose the data.
+
+`problem` is `null` while the problem editor does not exist. The companion then
+answers with the record and makes no task. A mark with a problem answers with a
+task.
+
+The companion answers on the same socket:
+
+| Answer | Meaning |
+|---|---|
+| `{ kind: 'record', record }` | The mark had no problem. The record is ready. |
+| `{ kind: 'task', task }` | The mark had a problem. The task is in line. |
+| `{ kind: 'error', message }` | The mark was bad. |
+
 ## Not made yet
 
-- The problem editor. The worker sends the selection to the companion as one
-  message: `{ kind: 'mark', stamp, record, tabUrl }`. The problem text is
-  absent.
+- The problem editor. The worker sends `problem: null`. The side panel shows
+  the record and does not ask for the problem text.
 - The style finder in the extension. Read the section "The permission we do
   NOT have" above.
-- The task flow in the side panel. The panel shows the status and the last
-  selection only.
+- The task flow in the side panel. The panel shows the status, the last
+  selection, and the record from the companion.
 
 ## The parts
 
