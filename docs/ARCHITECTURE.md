@@ -164,7 +164,7 @@ only. The key stays out of the browser.
 | 11 | The agent reads and writes the worktree. | `packages/agent-runner/src/tools.ts` | `TOOLS`, `callTool` |
 | 12 | The model answers. | `packages/model/src/client.ts` | `ModelClient.chat` |
 | 13 | The runner runs the type check and the lint. | `packages/agent-runner/src/index.ts` | `checkCode` |
-| 14 | The CLI reads the diff and stores the changed task. | `packages/cli/src/index.ts` | `worktreeDiff`, the `onTask` return |
+| 14 | The runner measures the diff. The CLI measures it again and stores the changed task. | `packages/agent-runner/src/index.ts`, `packages/cli/src/index.ts` | `worktreeDiff`, the `onTask` return |
 | 15 | The companion sends the changed task to every client. | `packages/index-service/src/index.ts` | `broadcast` |
 | 16 | The side panel shows the diff and the Accept button. | `packages/extension/entrypoints/sidepanel/main.ts` | `card` |
 | 17 | The user accepts. The tool applies the patch. | `packages/agent-runner/src/accept.ts` | `acceptDiff` |
@@ -172,9 +172,10 @@ only. The key stays out of the browser.
 | 19 | The two HTTP routes answer. | `packages/index-service/src/index.ts` | `GET /tasks`, `GET /state` |
 
 The runner makes one worktree for each task. The worktree uses the commit of
-the mark. The runner runs the type check and the optional lint after each
-agent edit. A gate that did not run reports null, and it never reports a pass.
-Read `docs/PIPELINE.md`.
+the mark. The runner measures the diff after each edit. The words of the agent
+are a summary, not the diff. The runner runs the type check and the optional
+lint after each edit. A gate that did not run reports null, and it never
+reports a pass. Read `docs/PIPELINE.md`.
 
 ## The rule for the agent
 

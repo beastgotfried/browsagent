@@ -38,7 +38,8 @@ JSON.
 1. **The plan.** `ModelAgent.plan` makes one call with no tools. It returns
    the short plan and the files. The task holds both. The side panel does not
    show the plan.
-2. **The edit.** `ModelAgent.edit` runs the tool loop.
+2. **The edit.** `ModelAgent.edit` runs the tool loop. It returns a summary
+   of the change. The runner measures the diff itself.
 
 ## The tool loop
 
@@ -67,7 +68,9 @@ there is no fourth.
 
 Every path is relative to the worktree root. Every path must stay inside the
 root. The function `inside` refuses an absolute path, a path with a `..` part,
-and a path that resolves outside the root.
+and a path that resolves outside the root. The function `safePath` then
+resolves the real path. A symbolic link that leaves the worktree is refused.
+A path that cannot be resolved is refused.
 
 A bad tool name and a bad argument give a text answer. The call does not
 throw. The model reads the text and tries again.
@@ -99,14 +102,19 @@ and cannot claim a pass.
 
 The diff is the measure of the repair. There is no picture check (D5).
 
-`worktreeDiff` in `packages/agent-runner/src/accept.ts` reads `git diff` in
-the worktree. The CLI writes that value into the task and the evidence. A new
-file that no `git add` records does not appear. The user reads the diff in the
-side panel.
+**The tool measures the evidence. The agent does not report the evidence.**
+
+`AgentRunner.run` reads `git diff` in the worktree with `worktreeDiff` in
+`packages/agent-runner/src/accept.ts`, after each edit. The words of
+`ModelAgent.edit` are a summary, not the diff. The CLI measures the diff a
+second time and compares the two values. A new file that no `git add` records
+does not appear. The user reads the diff in the side panel.
 
 ## The accept
 
 The agent never lands a commit (D9). The user presses **Accept the repair**.
-The panel sends `{ kind: 'accept', taskId }`. `acceptDiff` applies the patch to
-the working tree with `git apply --check` and then `git apply`. The tool makes
-no commit and no branch.
+A `done` task keeps its worktree until this step. `onTask` removes the
+worktree when a fault escapes the runner. Example: the worktree call fails, or
+the plan call fails. The panel sends `{ kind: 'accept', taskId }`. `acceptDiff`
+applies the patch to the working tree with `git apply --check` and then
+`git apply`. The tool makes no commit and no branch.

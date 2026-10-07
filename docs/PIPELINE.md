@@ -178,11 +178,13 @@ A stale context does not block a repair. The panel shows the stale mark.
    `AgentRunner` throws when the command is empty.
 7. The loop runs the edit again while a gate that ran failed and the try count
    is under `maxTries`. The CLI sets 3 tries. `Task.tries` counts the tries.
-8. `AgentRunner.run` returns the plan, the state, the evidence, and a diff
-   value from the words of the agent.
-9. `onTask` reads the diff of the worktree with `worktreeDiff` in
-   `packages/agent-runner/src/accept.ts`. It writes the state, the plan, the
-   files, the diff, and the evidence into the task.
+8. `AgentRunner.run` measures the diff of the worktree with `worktreeDiff`
+   after each edit. The words of the agent are a summary, not the diff. The
+   runner returns the plan, the state, the evidence, and the measured diff.
+9. `onTask` measures the diff a second time with `worktreeDiff` in
+   `packages/agent-runner/src/accept.ts`. The two measurements must agree. It
+   writes the state, the plan, the files, the measured diff, and the evidence
+   into the task.
 10. The companion stores the changed task and sends it to every client. The
     side panel shows the state, the diff, and the **Accept the repair**
     button.
@@ -213,7 +215,10 @@ user message.
 
 - The type check fails. Then the agent tries again. The runner stops the task
   after `maxTries` tries (3 in the CLI).
-- The agent throws a fault. Then the state is `failed`.
+- A fault stops the repair. The state is `failed`. `AgentRunner.run` catches a
+  fault from the agent edit and keeps the measured diff. `onTask` catches a
+  fault that escapes the runner, removes the worktree, and writes an empty
+  diff. A `done` task keeps its worktree until the accept step.
 - The type check command does not start. Then no gate ran, and the state is
   `unchecked`.
 - Two agents change the same file. Each worktree is separate. The second
