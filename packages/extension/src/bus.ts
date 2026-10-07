@@ -1,5 +1,6 @@
 import type {
   ElementRecord,
+  Problem,
   Selection,
   SourcePosition,
 } from '@browsagent/shared';
@@ -12,6 +13,9 @@ export type { Selection };
 export type ToBackground =
   | { kind: 'toggle-overlay' }
   | { kind: 'selected'; selection: Selection }
+  // The panel sends the mark. The worker holds the socket. The panel holds
+  // the problem text.
+  | { kind: 'send-mark'; selection: Selection; problem: Problem }
   | { kind: 'error'; message: string }
   | { kind: 'status' }
   | { kind: 'overlay-state'; active: boolean };

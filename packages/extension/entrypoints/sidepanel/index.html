@@ -16,6 +16,19 @@
         Click the browsagent icon in the toolbar, then click an element. Or
         press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>.
       </p>
+      <form id="problem-form">
+        <div>
+          <label for="problem-type">The kind of problem</label>
+          <select id="problem-type"></select>
+        </div>
+        <div>
+          <textarea id="problem-text" placeholder="What is wrong?"></textarea>
+        </div>
+        <div>
+          <button id="problem-send" type="submit">Send the repair request</button>
+        </div>
+        <div id="answer" class="hint"></div>
+      </form>
       <pre id="record">No selection.</pre>
     </main>
     <script type="module" src="./main.ts"></script>
