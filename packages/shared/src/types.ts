@@ -171,6 +171,12 @@ export interface Evidence {
   tries: number;
   /** The words of the fault, or null. */
   fault: string | null;
+  /**
+   * The code of a provider fault from the model client. Null when the fault
+   * is not from the provider. A non-null code marks the words as a provider
+   * fault, so the panel can report the provider state.
+   */
+  faultCode: ProviderErrorCode | null;
 }
 
 /** One task for one agent. */
@@ -270,6 +276,18 @@ export interface ProviderConfig {
   model: string;
   modelCheap: string;
 }
+
+/**
+ * The class of a provider fault. The model client names the value. The
+ * evidence of a task keeps it, and the panel reads it.
+ */
+export type ProviderErrorCode =
+  | 'data-policy'
+  /** The provider refused a key that is set. This code is not 'no-key'. */
+  | 'key-refused'
+  | 'no-key'
+  | 'no-credit'
+  | 'provider';
 
 export type ProviderStatus = 'no-key' | 'key-set' | 'key-bad';
 

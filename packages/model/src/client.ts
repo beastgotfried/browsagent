@@ -10,6 +10,7 @@ import type {
   ChatResult,
   ChatUsage,
   ProviderConfig,
+  ProviderErrorCode,
   ToolCall,
   ToolSpec,
 } from '@browsagent/shared';
@@ -18,14 +19,9 @@ import { hasKey } from './config.js';
 
 const TIMEOUT_MS = 120_000;
 
-/** The class of a provider fault. The panel shows this value. */
-export type ProviderErrorCode =
-  | 'data-policy'
-  /** The provider refused a key that is set. This code is not 'no-key'. */
-  | 'key-refused'
-  | 'no-key'
-  | 'no-credit'
-  | 'provider';
+// The provider fault code lives in the shared package. The evidence of a task
+// holds the code, so the type must cross the package boundary.
+export type { ProviderErrorCode } from '@browsagent/shared';
 
 /** One fault from the provider or from the way to the provider. */
 export class ProviderError extends Error {

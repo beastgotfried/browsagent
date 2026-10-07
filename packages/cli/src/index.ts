@@ -17,6 +17,7 @@ import {
   loadToken,
   ModelClient,
   ProviderError,
+  type ProviderErrorCode,
 } from '@browsagent/model';
 import {
   DEFAULT_PORT,
@@ -103,10 +104,11 @@ async function start(): Promise<void> {
   /**
    * Keep the words of one fault for the panel.
    *
-   * The value can be a ProviderError or the fault string of a task. A string
-   * carries no provider code, because only the words survive the runner.
+   * The value can be a ProviderError, the fault string of a task with its
+   * provider code, or a plain fault. A plain fault carries no code: only the
+   * words of a task fault survive the runner.
    */
-  const noteFault = (fault: unknown): void => {
+  const noteFault = (fault: unknown, code: ProviderErrorCode | null = null): void => {
     if (fault instanceof ProviderError) {
       providerFault = fault.message;
       // The 401 code is 'key-refused'. The code 'no-key' means that no key is
@@ -114,7 +116,12 @@ async function start(): Promise<void> {
       if (fault.code === 'key-refused') keyRefused = true;
       return;
     }
-    if (typeof fault === 'string' && fault.trim() !== '') providerFault = fault;
+    if (typeof fault === 'string' && fault.trim() !== '') {
+      providerFault = fault;
+      // A task fault carries the code of the provider. Only a refused key
+      // moves the panel to the key bad state.
+      if (code === 'key-refused') keyRefused = true;
+    }
   };
 
   const providerState = (): ProviderState => ({
@@ -156,9 +163,11 @@ async function start(): Promise<void> {
   const onTask = async (task: Task): Promise<Task> => {
     try {
       const result = await runner.run(task);
-      // The runner keeps the words of a task fault in the evidence. Show them
-      // in the panel, so a failed task always has a reason.
-      if (result.evidence.fault !== null) noteFault(result.evidence.fault);
+      // The runner keeps the words and the provider code of a task fault in
+      // the evidence. Give both to the panel: a refused key moves the
+      // provider state to "key bad", and any other provider fault shows its
+      // words.
+      noteFault(result.evidence.fault, result.evidence.faultCode);
       const cwd = `${worktreeDir}/${task.id.slice(0, 8)}`;
       // The runner measures the diff now. Measure it here a second time. The
       // two measurements must agree. A difference means one of them is wrong,
@@ -204,7 +213,16 @@ async function start(): Promise<void> {
         diff: '',
         // No gate ran on this path. The evidence reports null: it never
         // claims that a check failed.
-        evidence: { typecheckOk: null, lintOk: null, diff: '', tries: task.tries, fault },
+        evidence: {
+          typecheckOk: null,
+          lintOk: null,
+          diff: '',
+          tries: task.tries,
+          fault,
+          // A provider fault keeps its code on this path too, so the evidence
+          // names the class of the fault.
+          faultCode: error instanceof ProviderError ? error.code : null,
+        },
         updatedAt: new Date().toISOString(),
       };
     }

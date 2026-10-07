@@ -13,6 +13,7 @@ export type {
   ProjectContext,
   PropagateMode,
   ProviderConfig,
+  ProviderErrorCode,
   ProviderState,
   ProviderStatus,
   RuntimeRecord,

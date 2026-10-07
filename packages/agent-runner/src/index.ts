@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { ProviderError, type ProviderErrorCode } from '@browsagent/model';
+
 import { worktreeDiff } from './accept.js';
 
 import type { Evidence, Task, TaskState } from '@browsagent/shared';
@@ -214,7 +216,7 @@ export class AgentRunner {
    * - `unchecked`: no gate ran.
    *
    * A fault never reports `done`. The evidence holds the words of the fault
-   * in `evidence.fault`.
+   * in `evidence.fault` and the provider code in `evidence.faultCode`.
    */
   async run(
     task: Task,
@@ -228,6 +230,7 @@ export class AgentRunner {
     let check: CheckResult = { typecheckOk: false, lintOk: null, ran: false, fault: null };
     let agentThrew = false;
     let agentFault: string | null = null;
+    let agentFaultCode: ProviderErrorCode | null = null;
 
     // The try cap counts the tries that the task already spent. A task with no
     // try left makes no edit.
@@ -249,6 +252,9 @@ export class AgentRunner {
         // Keep the words of the fault. A failed task with no reason helps
         // nobody.
         agentFault = faultWords(error);
+        // A provider fault keeps its code. A worktree or agent fault has no
+        // code. The code lets the CLI report the provider state to the panel.
+        agentFaultCode = error instanceof ProviderError ? error.code : null;
         try {
           // A partial edit can still be in the worktree. Measure it, so the
           // evidence shows what the agent really did before it failed.
@@ -270,6 +276,8 @@ export class AgentRunner {
       diff,
       tries: task.tries,
       fault,
+      // Only an agent fault can name a provider code. A failed gate has none.
+      faultCode: agentFaultCode,
     };
 
     let state: TaskState = 'failed';
