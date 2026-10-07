@@ -13,6 +13,18 @@ export const tokenItem = storage.defineItem<string>('local:token', {
   fallback: '',
 });
 
+/** The largest number of marks that wait for a live socket. */
+export const QUEUED_MARKS_LIMIT = 100;
+
+/**
+ * The marks that wait for a live socket. The worker saves this queue in
+ * storage. Therefore the queue survives a worker restart.
+ */
+export const queuedMarksItem = storage.defineItem<unknown[]>(
+  'local:queued-marks',
+  { fallback: [] },
+);
+
 /** Get the token. Make one if it is absent. */
 export async function getToken(): Promise<string> {
   const saved = await tokenItem.getValue();

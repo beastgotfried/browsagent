@@ -8,6 +8,7 @@ import { defineConfig } from 'wxt';
  *
  * The permission list is narrow on purpose:
  * - `activeTab`  read the current tab after a user action.
+ * - `alarms`     wake the worker. The worker repairs a dead socket.
  * - `scripting`  add the content script.
  * - `storage`    keep the server address and the token.
  *
@@ -28,7 +29,7 @@ export default defineConfig({
       'Point at an element on a page. Write the problem. Get a checked patch.',
     minimum_chrome_version: '116',
 
-    permissions: ['activeTab', 'scripting', 'storage'],
+    permissions: ['activeTab', 'alarms', 'scripting', 'storage'],
 
     // The development hosts only. Every other host uses activeTab.
     host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
