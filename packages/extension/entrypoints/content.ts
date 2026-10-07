@@ -1,8 +1,19 @@
-import { Overlay, readRecord, readStamp } from '@browsagent/client';
+import { Overlay, instanceId, readRecord, readStamp } from '@browsagent/client';
+import type { StaticStamp } from '@browsagent/shared';
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
-import type { FromBackground, Selection, ToBackground } from '../src/bus.js';
+import {
+  createProbeToken,
+  isProbeResult,
+  PROBE_ATTR,
+  PROBE_TIMEOUT_MS,
+  type FromBackground,
+  type ProbeRequest,
+  type ProbeResult,
+  type Selection,
+  type ToBackground,
+} from '../src/bus.js';
 
 /**
  * The content script.
@@ -10,8 +21,55 @@ import type { FromBackground, Selection, ToBackground } from '../src/bus.js';
  * Its jobs:
  * 1. Draw the element-selection overlay.
  * 2. Read the stamp and the live value of the selected element.
- * 3. Send the selection to the background worker.
+ * 3. Ask the MAIN-world page bridge for the React source when the element has
+ *    no stamp.
+ * 4. Send the selection to the background worker.
  */
+
+/**
+ * Ask the page bridge for the React source of one node.
+ *
+ * The attribute on the node carries the token. The bridge reads the token and
+ * posts a result. The answer is the result, or null after PROBE_TIMEOUT_MS.
+ */
+function probe(node: Element): Promise<ProbeResult | null> {
+  return new Promise((resolve) => {
+    const token = createProbeToken();
+    const request: ProbeRequest = { source: 'browsagent', kind: 'probe', token };
+    const finish = (result: ProbeResult | null): void => {
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(timer);
+      node.removeAttribute(PROBE_ATTR);
+      resolve(result);
+    };
+    const onMessage = (event: MessageEvent): void => {
+      if (event.source !== window) return;
+      const data: unknown = event.data;
+      if (!isProbeResult(data)) return;
+      if (data.token !== token) return;
+      finish(data);
+    };
+    const timer = window.setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
+    window.addEventListener('message', onMessage);
+    node.setAttribute(PROBE_ATTR, token);
+    window.postMessage(request, '*');
+  });
+}
+
+/** Make a static stamp from one bridge result. Null if the result has no source. */
+function stampFromProbe(node: Element, result: ProbeResult): StaticStamp | null {
+  const src = result.src;
+  if (src === null) return null;
+  return {
+    src,
+    component: result.component,
+    expressions: {},
+    editable: !src.file.includes('node_modules'),
+    parentSrc: null,
+    inst: instanceId(node),
+  };
+}
+
 export default defineContentScript({
   matches: ['http://localhost/*', 'http://127.0.0.1/*'],
   runAt: 'document_idle',
@@ -28,6 +86,30 @@ export default defineContentScript({
       overlay = null;
     };
 
+    /**
+     * Read the stamp of the node. Ask the bridge when the node has no stamp.
+     * Report the node when the bridge finds no source either.
+     */
+    const select = async (node: Element): Promise<void> => {
+      let stamp = readStamp(node);
+      if (stamp === null) {
+        const result = await probe(node);
+        stamp = result === null ? null : stampFromProbe(node, result);
+      }
+      if (stamp === null) {
+        // The element has no stamp and no React source. Example: a node from a
+        // third-party script. Do not guess. Report it.
+        send({ kind: 'error', message: 'This element has no source stamp.' });
+        return;
+      }
+      const selection: Selection = {
+        stamp,
+        record: readRecord(node),
+        tabUrl: window.location.href,
+      };
+      send({ kind: 'selected', selection });
+    };
+
     const start = (): void => {
       // The overlay stops itself when the user presses Escape. Call start
       // again. A second start and a second stop are both safe.
@@ -38,22 +120,7 @@ export default defineContentScript({
       overlay = new Overlay({
         onSelect: (node) => {
           stop();
-          const stamp = readStamp(node);
-          if (stamp === null) {
-            // The element has no stamp. Example: a node from a third-party
-            // script. Do not guess. Report it.
-            void browser.runtime.sendMessage({
-              kind: 'error',
-              message: 'This element has no source stamp.',
-            } satisfies ToBackground);
-            return;
-          }
-          const selection: Selection = {
-            stamp,
-            record: readRecord(node),
-            tabUrl: window.location.href,
-          };
-          send({ kind: 'selected', selection });
+          void select(node);
         },
       });
       overlay.start();
