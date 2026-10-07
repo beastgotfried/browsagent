@@ -32,6 +32,9 @@
         color: #fff;
         cursor: pointer;
       }
+      #regenerate {
+        margin-left: 8px;
+      }
       .hint {
         color: #5b6472;
         margin-top: 18px;
@@ -39,6 +42,9 @@
       #note {
         margin-left: 10px;
         color: #2f6fed;
+      }
+      #note.error {
+        color: #c0392b;
       }
     </style>
   </head>
@@ -52,6 +58,7 @@
     <input id="token" type="text" readonly />
 
     <button id="save" type="button">Save</button>
+    <button id="regenerate" type="button">Regenerate</button>
     <span id="note"></span>
 
     <p class="hint">
