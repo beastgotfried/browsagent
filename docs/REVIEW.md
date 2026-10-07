@@ -197,28 +197,6 @@ production build is clean."
 `transformIndexHtml` hook at `:54-57` injects the client script with no
 condition. **The stamp and the client both ship to production.** Finding 9.
 
-## The fix order
-
-Do not build the lane decider first. It has no input until items 1 and 2 are
-finished.
-
-| Step | Fix | Finding |
-|---|---|---|
-| 1 | The transport must receive CDP events. | 2 |
-| 2 | The mark must carry an address the companion can resolve. | 1 |
-| 3 | The resolver output must be true: `winner`, inline styles, `cssText`. | 3, 4 |
-| 4 | The lane decider. It is the last step, not the first. | C3 |
-| 5 | `confidence` must measure the trust in the source position. | 5 |
-| 6 | The runner must stop asserting checks it never performs. | 10 |
-| 7 | The `apply` gate, the token check, and the `.catch`. | 9, 11, 12 |
-| 8 | The docs must match the code. | 15 |
-
-### Why item 1 comes first
-
-The stylesheet URL exists only in the `CSS.styleSheetAdded` event. The current
-`CdpSession` is send-only, so **no patch to `toRule` can ever find the file.**
-The transport is the blocker, not the line arithmetic.
-
 ## What survived from the claims
 
 | Claim | Verdict |
@@ -231,9 +209,3 @@ The transport is the blocker, not the line arithmetic.
 | C6 — the record joins two sides | Works for `className`. Asymmetric for everything else. |
 | C7 — one writer for each tree | Holds. |
 | C8 — the repair is checked | **False.** Type check and lint remain, and both default to pass. |
-
-## The consequence for the plan
-
-Steps 3 to 6 of the earlier plan would build a lane decider on inputs that do
-not exist. **Fix findings 1 to 4 first.** The decider is the last step, not the
-first.
