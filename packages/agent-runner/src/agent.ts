@@ -12,7 +12,7 @@ import type { Agent, AgentPlan } from './index.js';
 import { TOOLS, callTool } from './tools.js';
 
 /** The largest number of model turns in one repair. */
-const MAX_TURNS = 12;
+const MAX_TURNS = 20;
 
 /**
  * The fixed instructions. Every model call gets this text as the first
@@ -25,6 +25,9 @@ const INSTRUCTIONS = [
   'Do not add a dependency.',
   'Do not reformat a file that you did not need to change.',
   'Read a file before you write it.',
+  'The plan names the files. Read those files.',
+  'Do not explore the repository. The problem names one element. Do not read a',
+  'file that the plan does not name.',
   'Use the tools. There is no shell tool.',
   'When you are done, say which files you changed and why.',
 ].join('\n');
@@ -51,6 +54,29 @@ const PLAN_QUESTION = [
   'Answer with one JSON object and nothing else:',
   '{"plan": "the short plan", "files": ["a/path.ts"]}',
 ].join('\n');
+
+/**
+ * The question for the repair call.
+ *
+ * The plan names the files. WITHOUT THIS TEXT the agent explores the whole
+ * repository: a live run read docs/REVIEW.md for a CSS toolbar repair, spent
+ * seven of its twelve turns, and reached the first write on turn eight. The
+ * plan already held the answer, and the call could not see it.
+ */
+function editQuestion(plan: AgentPlan): string {
+  const files =
+    plan.files.length > 0 ? plan.files.join(', ') : 'the file that holds the marked element';
+  return [
+    'Your plan from the previous step:',
+    plan.text,
+    '',
+    `Read ONLY these files: ${files}.`,
+    'Make the smallest change with write_file.',
+    'Do not explore the repository. Do not read a file that is not named above.',
+    'Then answer with the files that you changed and the reason.',
+    'That last answer must hold no tool call.',
+  ].join('\n');
+}
 
 /** Read the plan and the files from the answer. Keep the words when the answer is not JSON. */
 function parsePlan(text: string): AgentPlan {
@@ -108,8 +134,8 @@ export class ModelAgent implements Agent {
    * did not stop, and its last tool result never reached it. A cap is not a
    * finished repair.
    */
-  async edit(task: Task, cwd: string): Promise<string> {
-    const messages = this.start(task, null);
+  async edit(task: Task, cwd: string, plan: AgentPlan): Promise<string> {
+    const messages = this.start(task, editQuestion(plan));
     let text = '';
 
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {

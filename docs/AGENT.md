@@ -57,6 +57,19 @@ JSON.
 One turn is one model call and its tool results. The cap stops a loop that
 never ends. The cap keeps the cost of one repair small.
 
+## The plan goes into the repair call
+
+The runner asks for a plan, then passes that plan to the repair call. The plan
+names the files.
+
+WITHOUT THE PLAN the agent explores the whole repository. A live run read
+`docs/REVIEW.md` for a CSS toolbar repair, spent seven of its twelve turns, and
+reached the first write on turn eight. The plan already held the answer, and the
+repair call could not see it. **A plan that the repair call cannot read is a
+wasted model call.**
+
+The repair question names the files and says: read only those files.
+
 ## The three tools
 
 The tools live in `packages/agent-runner/src/tools.ts`. There are three, and

@@ -105,8 +105,12 @@ export interface Agent {
    *
    * The text is NOT the diff. It is often null. The runner measures the diff
    * itself with `git diff`. Evidence is measured, never reported.
+   *
+   * THE PLAN GOES IN. The plan names the files. An agent without the plan
+   * explores the whole repository and spends its turn budget before it writes
+   * anything. A plan that the repair call cannot read is a wasted model call.
    */
-  edit(task: Task, cwd: string): Promise<string>;
+  edit(task: Task, cwd: string, plan: AgentPlan): Promise<string>;
 }
 
 /** The result of the code check. */
@@ -279,7 +283,7 @@ export class AgentRunner {
           // Count the attempt on the task. The task store holds this object.
           task.tries += 1;
           try {
-            await this.agent.edit(task, cwd);
+            await this.agent.edit(task, cwd, plan);
           } catch (error) {
             // A transient provider fault is worth one more attempt while a
             // try remains. This retry exists because a provider throw on the
