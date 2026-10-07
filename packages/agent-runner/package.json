@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@browsagent/model": "workspace:*",
     "@browsagent/shared": "workspace:*"
   },
   "devDependencies": {

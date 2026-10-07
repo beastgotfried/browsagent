@@ -196,3 +196,6 @@ export class AgentRunner {
     return { evidence, diff, plan, state };
   }
 }
+
+export { ModelAgent } from './agent.js';
+export { TOOLS, callTool } from './tools.js';

@@ -200,6 +200,9 @@ importers:
 
   packages/agent-runner:
     dependencies:
+      '@browsagent/model':
+        specifier: workspace:*
+        version: link:../model
       '@browsagent/shared':
         specifier: workspace:*
         version: link:../shared
