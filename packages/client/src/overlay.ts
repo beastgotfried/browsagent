@@ -44,11 +44,6 @@ export class Overlay {
     this.unmount();
   }
 
-  toggle(): void {
-    if (this.active) this.stop();
-    else this.start();
-  }
-
   private mount(): void {
     const host = document.createElement('div');
     host.id = HOST_ID;

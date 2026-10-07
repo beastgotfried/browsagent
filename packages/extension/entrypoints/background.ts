@@ -17,7 +17,7 @@ import {
  * 2. Reconnect when the socket closes.
  * 3. Route the messages between the content script, the panel, and the socket.
  * 4. Answer the `toggle-overlay` command.
- * 5. Hold the overlay state of each tab.
+ * 5. Ask the active tab for the live overlay state before each change.
  */
 export default defineBackground(() => {
   let socket: WebSocket | null = null;
@@ -31,16 +31,17 @@ export default defineBackground(() => {
   // The marks that wait for a live socket. This array is a copy of the storage
   // item. Each change writes the storage item.
   let queue: unknown[] = [];
-  // The tab ids whose overlay is on. The worker owns this state. Therefore
-  // every `overlay` message carries the next state and not a toggle.
-  const overlayTabs = new Set<number>();
 
   // Load the queue before the worker opens a socket or takes a new message.
   // Without the wait an early message and the load can overwrite each other.
+  // A failed load must not erase the saved marks. No write runs before a
+  // successful load.
+  let queueLoaded = false;
   const queueReady: Promise<void> = queuedMarksItem
     .getValue()
     .then((saved) => {
       queue = saved.slice(-QUEUED_MARKS_LIMIT);
+      queueLoaded = true;
     })
     .catch(() => undefined);
 
@@ -48,6 +49,8 @@ export default defineBackground(() => {
   let queueWrite: Promise<void> = Promise.resolve();
 
   const saveQueue = (): void => {
+    // A failed load keeps the saved marks. Do not overwrite them.
+    if (!queueLoaded) return;
     queueWrite = queueWrite
       .then(() => queuedMarksItem.setValue(queue.slice()))
       .catch(() => undefined);
@@ -98,17 +101,25 @@ export default defineBackground(() => {
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       backoff = Math.min(backoff * 2, 15000);
-      void open();
+      void open().then((madeSocket) => {
+        // open() returns no socket when the old socket is still CONNECTING or
+        // CLOSING. Arm the next try. The timer must not run out.
+        if (!madeSocket && !connected && reconnectTimer === null) {
+          scheduleReconnect();
+        }
+      });
     }, backoff);
   };
 
-  const open = async (): Promise<void> => {
+  // True when this call makes the socket. A call that returns early makes no
+  // socket. The reconnect timer uses the value.
+  const open = async (): Promise<boolean> => {
     // Exactly one socket. Stop when a socket is in the CONNECTING or OPEN
     // state, when a reconnect waits in the timer, or when an earlier open()
     // call is between its awaits.
-    if (opening) return;
-    if (socket !== null && socket.readyState !== WebSocket.CLOSED) return;
-    if (reconnectTimer !== null) return;
+    if (opening) return false;
+    if (socket !== null && socket.readyState !== WebSocket.CLOSED) return false;
+    if (reconnectTimer !== null) return false;
 
     opening = true;
     try {
@@ -153,37 +164,47 @@ export default defineBackground(() => {
         ws.close();
         scheduleReconnect();
       });
+      return true;
+    } catch (error) {
+      // The address can be bad. A WebSocket needs a ws, wss, http, or https
+      // scheme. Report the error and try again later.
+      const detail = error instanceof Error ? error.message : String(error);
+      toPanel({ kind: 'error', message: `The socket did not open: ${detail}` });
+      scheduleReconnect();
+      return false;
     } finally {
       opening = false;
     }
   };
 
+  // Ask the active tab for the live overlay state. Send the opposite value.
+  // The state lives in the tab. Therefore a worker restart, a page load, or an
+  // Escape press cannot make the two sides disagree.
   const toggleOverlay = async (): Promise<void> => {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
     if (!tab?.id) return;
 
-    const active = !overlayTabs.has(tab.id);
-    if (active) overlayTabs.add(tab.id);
-    else overlayTabs.delete(tab.id);
+    const answer = await browser.tabs
+      .sendMessage<FromBackground, ToBackground | undefined>(tab.id, {
+        kind: 'overlay-query',
+      })
+      .catch(() => undefined);
+    // No state answer means no content script in the tab. Nothing can change
+    // there.
+    if (answer?.kind !== 'overlay-state') return;
 
+    const active = !answer.active;
     await browser.tabs
       .sendMessage(tab.id, { kind: 'overlay', active } satisfies FromBackground)
       .catch(() => undefined);
-  };
-
-  // The content script stops the overlay before it reports a selection or an
-  // error without a stamp. Forget the state of that tab.
-  const forgetOverlay = (tabId: number | undefined): void => {
-    if (tabId === undefined) return;
-    overlayTabs.delete(tabId);
   };
 
   browser.commands.onCommand.addListener((command) => {
     if (command === 'toggle-overlay') void toggleOverlay();
   });
 
-  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const typed = message as ToBackground;
 
     if (typed.kind === 'status') {
@@ -202,12 +223,6 @@ export default defineBackground(() => {
     if (typed.kind === 'selected') {
       const selection: Selection = typed.selection;
       send({ kind: 'mark', ...selection });
-      forgetOverlay(sender.tab?.id);
-      return false;
-    }
-
-    if (typed.kind === 'error') {
-      forgetOverlay(sender.tab?.id);
       return false;
     }
 
@@ -216,7 +231,14 @@ export default defineBackground(() => {
 
   void open();
   // The first status must show the saved marks. Wait for the queue load.
-  void queueReady.then(() => status());
+  void queueReady.then(() => {
+    status();
+    // Report a failed load after the first status. The status would hide the
+    // error.
+    if (!queueLoaded) {
+      toPanel({ kind: 'error', message: 'The saved marks did not load.' });
+    }
+  });
 
   // MV3 workers sleep. This alarm wakes the worker and repairs a dead socket.
   // Chrome before version 120 clamps a shorter period to 1 minute. A 1 minute

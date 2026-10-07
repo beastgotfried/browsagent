@@ -15,14 +15,15 @@ The list is narrow on purpose. Read this table before you add a permission.
 
 | Permission | Why |
 |---|---|
-| `activeTab` | Read the current tab after a user action. |
 | `alarms` | Wake the worker. The worker repairs a dead socket. |
-| `scripting` | Add the content script. |
 | `storage` | Keep the server address and the token. |
 | `sidePanel` | WXT adds this because the `sidepanel` entrypoint exists. |
 
 WXT adds `tabs` to the development manifest. The hot reload uses it. The
 production manifest does not hold it.
+
+The permissions `activeTab` and `scripting` are absent. No code uses them yet.
+The step that adds the content script on demand must add them.
 
 The host list holds the development hosts only:
 
@@ -31,7 +32,7 @@ http://localhost/*
 http://127.0.0.1/*
 ```
 
-Every other host uses `activeTab`. Do not add `<all_urls>`.
+The content script runs on the same two hosts. Do not add `<all_urls>`.
 
 ## The permission we do NOT have
 
@@ -47,16 +48,24 @@ Therefore the user must turn it on with a clear action.
 
 The `overlay` message sets the state. The message is not a toggle.
 
-The worker owns the overlay state of each tab. The worker keeps the tab ids in
-a set. Therefore the message carries the next state, and not a direction:
+The content script owns the live overlay state. The overlay stops itself when
+the user presses Escape. A page load makes a new content script. Therefore the
+state of a tab can change without a message to the worker. The worker asks the
+tab for the state before each change:
+
+```ts
+{ kind: 'overlay-query' }                  // the worker asks
+{ kind: 'overlay-state', active: boolean } // the content script answers
+```
+
+The worker then sends the opposite value to the tab:
 
 ```ts
 { kind: 'overlay', active: boolean }
 ```
 
-The worker sends the message to one tab. A `true` value starts the overlay. A
-`false` value stops the overlay. The content script obeys the value. The
-content script never flips its own state.
+A `true` value starts the overlay. A `false` value stops the overlay. The
+content script obeys the value.
 
 The worker accepts a request for a change in one of two ways:
 
@@ -67,10 +76,8 @@ The worker accepts a request for a change in one of two ways:
 Only the command is wired in the interface. The side panel does not send the
 message yet.
 
-The worker flips the value in its set. Then the worker sends the `overlay`
-message with the new value. The content script stops the overlay before it
-reports a selection or an error. The worker then forgets the tab. Therefore
-the next request starts the overlay again.
+The worker reads the live state before each change. Therefore a worker
+restart, a page load, or an Escape press cannot make the two sides disagree.
 
 ## The socket lifecycle
 
@@ -109,6 +116,8 @@ each other.
 
 The writes run in sequence. A slow write cannot overwrite a new one. The cap
 is `QUEUED_MARKS_LIMIT`, 100 marks. The queue drops the oldest mark at the cap.
+A failed load keeps the saved marks. The worker does not write the queue
+before a successful load.
 
 `flushQueue` sends the marks in order. The worker removes a mark after its
 send call. A worker stop can send a mark again. It cannot drop a mark.
@@ -117,7 +126,8 @@ send call. A worker stop can send a mark again. It cannot drop a mark.
 
 The backoff starts at 1000 ms and doubles to a maximum of 15000 ms. A
 successful open resets the backoff to 1000 ms. The timer is the only guard.
-`scheduleReconnect` returns while the timer exists.
+`scheduleReconnect` returns while the timer exists. When the timer cannot make
+a socket, it arms the next try. Therefore the timer never runs out.
 
 ### The alarm
 
@@ -154,8 +164,10 @@ The exchange for one element:
    bridge posts an answer:
    `{ source: 'browsagent', kind: 'probe-result', token, component, src }`.
 5. The content script removes the attribute. It accepts an answer only when
-   the token matches and the source is `browsagent`. The type checks keep a
-   page message out of the stamp.
+   the token matches and the source is `browsagent`. The type checks reject
+   malformed data. They do not authenticate the page. The page hears the
+   request and the token. Therefore a page can post a forged answer. The
+   stamp trusts the page, as the DOM stamp (`data-src`) does.
 6. A timer of 300 ms (`PROBE_TIMEOUT_MS`) answers `null`. A missing answer is
    not an error.
 

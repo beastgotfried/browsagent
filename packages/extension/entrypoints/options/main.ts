@@ -22,6 +22,16 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** True when the address can make a WebSocket. */
+function isServerAddress(address: string): boolean {
+  try {
+    const url = new URL(address);
+    return ['ws:', 'wss:', 'http:', 'https:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
 /** Write the result of the last action. */
 function report(message: string, failed: boolean): void {
   if (note === null) return;
@@ -42,6 +52,10 @@ save?.addEventListener('click', () => {
   void (async () => {
     const address = server?.value.trim() ?? '';
     const next = address === '' ? DEFAULT_SERVER : address;
+    if (!isServerAddress(next)) {
+      report('Save failed: the address needs a ws, wss, http, or https scheme.', true);
+      return;
+    }
     try {
       await serverItem.setValue(next);
       // The token field is read only. Save its value as well. The companion

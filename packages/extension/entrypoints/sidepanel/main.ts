@@ -28,6 +28,13 @@ function show(selection: Selection): void {
   );
 }
 
+function showError(message: string): void {
+  if (state === null) return;
+  state.textContent = `error: ${message}`;
+  state.className = 'pill pill--off';
+  state.title = '';
+}
+
 function ask(): void {
   void browser.runtime
     .sendMessage({ kind: 'status' } satisfies ToBackground)
@@ -42,6 +49,7 @@ browser.runtime.onMessage.addListener((message: unknown) => {
   const typed = message as FromBackground;
   if (typed.kind === 'status') paint(typed.connected, typed.server, typed.queued);
   if (typed.kind === 'selected') show(typed.selection);
+  if (typed.kind === 'error') showError(typed.message);
 });
 
 ask();

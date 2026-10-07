@@ -16,15 +16,19 @@ export type ToBackground =
   | { kind: 'toggle-overlay' }
   | { kind: 'selected'; selection: Selection }
   | { kind: 'error'; message: string }
-  | { kind: 'status' };
+  | { kind: 'status' }
+  | { kind: 'overlay-state'; active: boolean };
 
 /**
  * The messages from the worker to the content script and the panel.
  *
  * The `overlay` message sets the overlay state. It does not toggle the state.
+ * The `overlay-query` message asks the content script for the live overlay
+ * state. The content script answers with `{ kind: 'overlay-state', active }`.
  */
 export type FromBackground =
   | { kind: 'overlay'; active: boolean }
+  | { kind: 'overlay-query' }
   | { kind: 'status'; connected: boolean; server: string; queued: number }
   | { kind: 'selected'; selection: Selection }
   | { kind: 'error'; message: string };
@@ -97,7 +101,10 @@ function isSourcePosition(value: unknown): value is SourcePosition {
   );
 }
 
-/** True for a probe result. The check keeps a page message out of the stamp. */
+/**
+ * True for a probe result. The check rejects malformed data. It cannot keep a
+ * page message out of the stamp: the page hears the request and the token.
+ */
 export function isProbeResult(value: unknown): value is ProbeResult {
   if (!isRecord(value)) return false;
   if (value['source'] !== 'browsagent') return false;

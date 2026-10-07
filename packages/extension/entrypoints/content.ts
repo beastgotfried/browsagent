@@ -39,7 +39,11 @@ function probe(node: Element): Promise<ProbeResult | null> {
     const finish = (result: ProbeResult | null): void => {
       window.removeEventListener('message', onMessage);
       window.clearTimeout(timer);
-      node.removeAttribute(PROBE_ATTR);
+      // Two probes of one node can overlap. Remove the attribute only when it
+      // still carries the token of this probe.
+      if (node.getAttribute(PROBE_ATTR) === token) {
+        node.removeAttribute(PROBE_ATTR);
+      }
       resolve(result);
     };
     const onMessage = (event: MessageEvent): void => {
@@ -126,11 +130,20 @@ export default defineContentScript({
       overlay.start();
     };
 
-    browser.runtime.onMessage.addListener((message: unknown) => {
+    browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const typed = message as FromBackground;
+      if (typed.kind === 'overlay-query') {
+        // The live state lives in this script. The worker asks for it before
+        // each change. Therefore the two sides cannot disagree.
+        sendResponse({
+          kind: 'overlay-state',
+          active: overlay?.isActive ?? false,
+        } satisfies ToBackground);
+        return false;
+      }
       if (typed.kind !== 'overlay') return;
-      // The worker owns the overlay state. A true value starts the overlay and
-      // a false value stops it. This script does not toggle the overlay.
+      // The worker sends the next state. A true value starts the overlay and a
+      // false value stops it. This script does not toggle the overlay.
       if (typed.active) start();
       else stop();
     });
