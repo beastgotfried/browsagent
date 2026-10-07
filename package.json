@@ -12,7 +12,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm --filter @browsagent/cli dev",
-    "demo": "pnpm --filter demo-app dev"
+    "demo": "pnpm --filter demo-app dev",
+    "prove": "node scripts/prove-e2e.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
