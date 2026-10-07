@@ -167,6 +167,10 @@ export interface Evidence {
   lintOk: boolean | null;
   /** The diff of the repair. The user reads this diff. */
   diff: string;
+  /** The number of tries that the run used. */
+  tries: number;
+  /** The words of the fault, or null. */
+  fault: string | null;
 }
 
 /** One task for one agent. */

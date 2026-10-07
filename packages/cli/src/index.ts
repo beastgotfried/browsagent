@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import {
   acceptDiff,
   AgentRunner,
+  faultWords,
   ModelAgent,
   worktreeDiff,
   type RunnerOptions,
@@ -99,13 +100,21 @@ async function start(): Promise<void> {
   let providerFault: string | null = null;
   let keyRefused = false;
 
-  /** Keep the words of one provider fault for the panel. */
-  const noteFault = (error: unknown): void => {
-    if (!(error instanceof ProviderError)) return;
-    providerFault = error.message;
-    // The 401 code is 'key-refused'. The code 'no-key' means that no key is
-    // set, and hasKey already reports that case.
-    if (error.code === 'key-refused') keyRefused = true;
+  /**
+   * Keep the words of one fault for the panel.
+   *
+   * The value can be a ProviderError or the fault string of a task. A string
+   * carries no provider code, because only the words survive the runner.
+   */
+  const noteFault = (fault: unknown): void => {
+    if (fault instanceof ProviderError) {
+      providerFault = fault.message;
+      // The 401 code is 'key-refused'. The code 'no-key' means that no key is
+      // set, and hasKey already reports that case.
+      if (fault.code === 'key-refused') keyRefused = true;
+      return;
+    }
+    if (typeof fault === 'string' && fault.trim() !== '') providerFault = fault;
   };
 
   const providerState = (): ProviderState => ({
@@ -147,6 +156,9 @@ async function start(): Promise<void> {
   const onTask = async (task: Task): Promise<Task> => {
     try {
       const result = await runner.run(task);
+      // The runner keeps the words of a task fault in the evidence. Show them
+      // in the panel, so a failed task always has a reason.
+      if (result.evidence.fault !== null) noteFault(result.evidence.fault);
       const cwd = `${worktreeDir}/${task.id.slice(0, 8)}`;
       // The runner measures the diff now. Measure it here a second time. The
       // two measurements must agree. A difference means one of them is wrong,
@@ -178,7 +190,9 @@ async function start(): Promise<void> {
       if (next.state !== 'done') await runner.removeWorktree(task).catch(() => undefined);
       return next;
     } catch (error) {
-      noteFault(error);
+      const fault = faultWords(error);
+      // A ProviderError keeps its code. A plain fault keeps only its words.
+      noteFault(error instanceof ProviderError ? error : fault);
       // Return the task in the failed state. A throw here leaves the task in
       // the queued state for ever, and the panel then shows a task that never
       // moves. The worktree of a failed task goes away, because the accept
@@ -190,7 +204,7 @@ async function start(): Promise<void> {
         diff: '',
         // No gate ran on this path. The evidence reports null: it never
         // claims that a check failed.
-        evidence: { typecheckOk: null, lintOk: null, diff: '' },
+        evidence: { typecheckOk: null, lintOk: null, diff: '', tries: task.tries, fault },
         updatedAt: new Date().toISOString(),
       };
     }

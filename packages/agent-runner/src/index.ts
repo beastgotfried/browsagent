@@ -45,6 +45,20 @@ export function commandWords(result: CommandResult): string {
   return words === '' ? 'The command gave no message.' : words;
 }
 
+/** The most characters of a gate fault that the evidence keeps. */
+const MAX_GATE_WORDS = 500;
+
+/** The words of one fault value. The value can be an Error or a plain value. */
+export function faultWords(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The words of one failed gate, capped at 500 characters. */
+function gateFault(result: CommandResult): string {
+  const words = commandWords(result);
+  return words.length > MAX_GATE_WORDS ? words.slice(0, MAX_GATE_WORDS) : words;
+}
+
 export interface RunnerOptions {
   /** The root of the project. */
   root: string;
@@ -95,6 +109,8 @@ interface CheckResult {
   lintOk: boolean | null;
   /** True when every configured gate started. */
   ran: boolean;
+  /** The words of the failed gate. Null when every gate that ran passed. */
+  fault: string | null;
 }
 
 /** True when every gate that ran passed. */
@@ -159,8 +175,9 @@ export class AgentRunner {
   async checkCode(cwd: string): Promise<CheckResult> {
     const typecheck = await run('sh', ['-c', this.options.typecheck], cwd);
     if (!typecheck.started) {
-      // The required gate did not start. No other gate can help.
-      return { typecheckOk: false, lintOk: null, ran: false };
+      // The required gate did not start. No other gate can help. Keep the
+      // words of the fault, so the evidence names the reason.
+      return { typecheckOk: false, lintOk: null, ran: false, fault: gateFault(typecheck) };
     }
 
     const lintCommand = this.options.lint?.trim();
@@ -169,12 +186,17 @@ export class AgentRunner {
         ? null
         : await run('sh', ['-c', lintCommand], cwd);
 
-    return {
-      typecheckOk: typecheck.code === 0,
-      // A lint that did not start did not run. The value is null.
-      lintOk: lint === null || !lint.started ? null : lint.code === 0,
-      ran: lint === null || lint.started,
-    };
+    const typecheckOk = typecheck.code === 0;
+    // A lint that did not start did not run. The value is null.
+    const lintOk = lint === null || !lint.started ? null : lint.code === 0;
+
+    // The words of the first gate that failed. The type check comes first: a
+    // broken tree needs its compiler words more than its lint words.
+    let fault: string | null = null;
+    if (!typecheckOk) fault = gateFault(typecheck);
+    else if (lint !== null && lint.code !== 0) fault = gateFault(lint);
+
+    return { typecheckOk, lintOk, ran: lint === null || lint.started, fault };
   }
 
   /**
@@ -190,6 +212,9 @@ export class AgentRunner {
    * - `failed`: a gate failed after maxTries, the diff stayed empty, or the
    *   agent threw a fault.
    * - `unchecked`: no gate ran.
+   *
+   * A fault never reports `done`. The evidence holds the words of the fault
+   * in `evidence.fault`.
    */
   async run(
     task: Task,
@@ -200,8 +225,9 @@ export class AgentRunner {
     const plan = await this.agent.plan(task, cwd);
 
     let diff = '';
-    let check: CheckResult = { typecheckOk: false, lintOk: null, ran: false };
+    let check: CheckResult = { typecheckOk: false, lintOk: null, ran: false, fault: null };
     let agentThrew = false;
+    let agentFault: string | null = null;
 
     // The try cap counts the tries that the task already spent. A task with no
     // try left makes no edit.
@@ -218,8 +244,11 @@ export class AgentRunner {
           check = await this.checkCode(cwd);
           // A repair with no change is not a repair. Try again.
         } while (check.ran && (!passed(check) || diff.trim() === '') && task.tries < maxTries);
-      } catch {
+      } catch (error) {
         agentThrew = true;
+        // Keep the words of the fault. A failed task with no reason helps
+        // nobody.
+        agentFault = faultWords(error);
         try {
           // A partial edit can still be in the worktree. Measure it, so the
           // evidence shows what the agent really did before it failed.
@@ -230,19 +259,25 @@ export class AgentRunner {
       }
     }
 
+    // The agent fault comes first: it stopped the loop. A failed gate is the
+    // other reason.
+    const fault = agentFault ?? check.fault;
     const evidence: Evidence = {
       // A gate that did not run reports null. It never reports a pass and it
       // never reports a failure.
       typecheckOk: check.ran ? check.typecheckOk : null,
       lintOk: check.lintOk,
       diff,
+      tries: task.tries,
+      fault,
     };
 
     let state: TaskState = 'failed';
     if (!agentThrew) {
       if (!check.ran) state = 'unchecked';
-      // An empty diff is no repair. The state must not say done.
-      else if (passed(check) && diff.trim() !== '') state = 'done';
+      // An empty diff is no repair. A fault is no repair. The state must not
+      // say done in either case.
+      else if (fault === null && passed(check) && diff.trim() !== '') state = 'done';
     }
 
     return { evidence, diff, plan, state };
