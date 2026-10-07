@@ -12,6 +12,30 @@ import {
 } from '../src/config.js';
 
 /**
+ * True for a message that the panel can read.
+ *
+ * The companion is a different program. A frame from it is not trusted. The
+ * worker checks the kind before it forwards the frame.
+ */
+function isFromBackground(value: unknown): value is FromBackground {
+  if (typeof value !== 'object' || value === null) return false;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === 'indexed') return typeof (value as { count?: unknown }).count === 'number';
+  return (
+    kind === 'overlay' ||
+    kind === 'overlay-query' ||
+    kind === 'status' ||
+    kind === 'selected' ||
+    kind === 'record' ||
+    kind === 'error' ||
+    kind === 'task' ||
+    kind === 'task-list' ||
+    kind === 'accepted' ||
+    kind === 'context'
+  );
+}
+
+/**
  * The address of the companion for HTTP reads.
  *
  * The saved address starts with ws or wss. The `fetch` function needs http or
@@ -43,6 +67,10 @@ export default defineBackground(() => {
   // The marks that wait for a live socket. This array is a copy of the storage
   // item. Each change writes the storage item.
   let queue: unknown[] = [];
+  // The last selection of the page. A mark can arrive while the panel is
+  // closed. The worker keeps the selection, so the next panel can give it a
+  // problem.
+  let lastSelection: Selection | null = null;
 
   // Load the queue before the worker opens a socket or takes a new message.
   // Without the wait an early message and the load can overwrite each other.
@@ -103,7 +131,10 @@ export default defineBackground(() => {
    */
   const loadTasks = async (): Promise<void> => {
     try {
-      const reply = await fetch(`${httpBase(server)}/tasks`);
+      const token = await getToken();
+      const reply = await fetch(
+        `${httpBase(server)}/tasks?token=${encodeURIComponent(token)}`,
+      );
       if (!reply.ok) return;
       toPanel({ kind: 'task-list', tasks: (await reply.json()) as Task[] });
     } catch {
@@ -178,7 +209,14 @@ export default defineBackground(() => {
       ws.addEventListener('message', (event) => {
         if (socket !== ws) return;
         try {
-          toPanel(JSON.parse(String(event.data)) as FromBackground);
+          const data: unknown = JSON.parse(String(event.data));
+          // Forward one checked frame only. A broken payload must not reach
+          // the panel.
+          if (!isFromBackground(data)) {
+            toPanel({ kind: 'error', message: 'the companion sent bad data' });
+            return;
+          }
+          toPanel(data);
         } catch {
           toPanel({ kind: 'error', message: 'the companion sent bad data' });
         }
@@ -252,7 +290,7 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const typed = message as ToBackground;
 
-    if (typed.kind === 'status') {
+    if (typed.kind === 'status-request') {
       // Answer after the queue load. The count must include the saved marks.
       void queueReady.then(() => {
         sendResponse({ kind: 'status', connected, server, queued: queue.length });
@@ -260,6 +298,9 @@ export default defineBackground(() => {
       // A panel can open after the socket connect. That panel missed the
       // task-list message. Read the list again for this panel.
       void loadTasks();
+      // A mark can arrive while the panel is closed. Send the last selection,
+      // so the new panel can give it a problem.
+      if (lastSelection !== null) toPanel({ kind: 'selected', selection: lastSelection });
       return true;
     }
 
@@ -270,6 +311,7 @@ export default defineBackground(() => {
 
     if (typed.kind === 'selected') {
       const selection: Selection = typed.selection;
+      lastSelection = selection;
       // A click alone carries no problem. Send a null problem, so the
       // companion answers with the record. The editor sends the problem later
       // in a send-mark message.
@@ -284,11 +326,16 @@ export default defineBackground(() => {
     if (typed.kind === 'send-mark') {
       // The panel holds the problem text. The worker holds the socket. The
       // queue keeps the mark when the socket is closed.
+      lastSelection = typed.selection;
       send({
         kind: 'mark',
         selection: typed.selection,
         problem: typed.problem,
       } satisfies ClientToServer);
+      // Answer the panel. Chrome closes the message port when the listener
+      // returns false with no answer, and the panel then reports a failed
+      // send for a mark that is in the queue.
+      sendResponse({ kind: 'status', connected, server, queued: queue.length });
       return false;
     }
 

@@ -10,7 +10,13 @@ import {
 } from '@browsagent/agent-runner';
 import { isStale, makeContext, readContext, writeContext } from '@browsagent/context';
 import { IndexService } from '@browsagent/index-service';
-import { hasKey, loadProviderConfig, ModelClient, ProviderError } from '@browsagent/model';
+import {
+  hasKey,
+  loadProviderConfig,
+  loadToken,
+  ModelClient,
+  ProviderError,
+} from '@browsagent/model';
 import {
   DEFAULT_PORT,
   type AcceptResult,
@@ -19,8 +25,21 @@ import {
   type Task,
 } from '@browsagent/shared';
 
-/** The type check command of this project. The type check is a required gate. */
-const TYPECHECK = 'pnpm -r typecheck';
+/**
+ * The check command of this project.
+ *
+ * The type check is a required gate. The build runs first: a fresh worktree
+ * holds no build output, and a workspace package without its dist has no
+ * types for its importers.
+ */
+const TYPECHECK = 'pnpm -r build && pnpm -r typecheck';
+
+/**
+ * The prepare command of this project. The type check runs in a fresh
+ * worktree. That worktree holds no node_modules, so the dependencies must
+ * come first. The store of pnpm usually holds every package already.
+ */
+const PREPARE = 'pnpm install --frozen-lockfile --prefer-offline';
 
 /** The manager stops one task after this many tries. */
 const MAX_TRIES = 3;
@@ -58,10 +77,20 @@ async function start(): Promise<void> {
   const root = process.cwd();
   const port = Number(process.env['BROWSAGENT_PORT'] ?? DEFAULT_PORT);
   const project = process.env['BROWSAGENT_PROJECT'] ?? root.split('/').pop() ?? 'project';
-  const commit = currentCommit();
 
   const config = await loadProviderConfig(root);
   const client = new ModelClient(config);
+
+  // The extension makes the token. The companion must hold the same value.
+  // Without a token any page or process on this machine can use the service.
+  const token = await loadToken(root);
+  if (token === null) {
+    console.error('[browsagent] No token is set. The companion does not start.');
+    console.error('[browsagent] Copy the token from the extension options page.');
+    console.error('[browsagent] Then set BROWSAGENT_TOKEN, or add a "token" value to .browsagent/config.json.');
+    process.exitCode = 1;
+    return;
+  }
 
   // The agent gets this context. A later context pass replaces this binding.
   let context: ProjectContext | null = await readContext(root);
@@ -74,7 +103,9 @@ async function start(): Promise<void> {
   const noteFault = (error: unknown): void => {
     if (!(error instanceof ProviderError)) return;
     providerFault = error.message;
-    if (error.code === 'no-key') keyRefused = true;
+    // The 401 code is 'key-refused'. The code 'no-key' means that no key is
+    // set, and hasKey already reports that case.
+    if (error.code === 'key-refused') keyRefused = true;
   };
 
   const providerState = (): ProviderState => ({
@@ -87,13 +118,17 @@ async function start(): Promise<void> {
 
   const contextState = (): { context: ProjectContext | null; stale: boolean } => ({
     context,
-    stale: context !== null && isStale(context, commit),
+    // HEAD can move while the companion runs. Read it for each answer.
+    stale: context !== null && isStale(context, currentCommit()),
   });
 
   const worktreeDir = `${root}/.browsagent/worktrees`;
   const runnerOptions: RunnerOptions = {
     root,
     worktreeDir,
+    // The check runs in a fresh worktree. The prepare command gives that
+    // worktree its dependencies before the agent starts.
+    prepare: PREPARE,
     typecheck: TYPECHECK,
     // This project has no lint. An empty command means "no lint". The runner
     // then reports lintOk null. It never reports a pass.
@@ -118,9 +153,18 @@ async function start(): Promise<void> {
       // and the diff is the only evidence that the repair is correct.
       const measured = await worktreeDiff(cwd);
       if (result.diff !== measured) {
-        noteFault('the runner diff and the measured diff are different');
+        await runner.removeWorktree(task).catch(() => undefined);
+        return {
+          ...task,
+          state: 'failed',
+          plan: result.plan.text,
+          files: result.plan.files,
+          diff: result.diff,
+          evidence: { ...result.evidence, diff: result.diff },
+          updatedAt: new Date().toISOString(),
+        };
       }
-      return {
+      const next: Task = {
         ...task,
         state: result.state,
         plan: result.plan.text,
@@ -129,18 +173,24 @@ async function start(): Promise<void> {
         evidence: { ...result.evidence, diff: measured },
         updatedAt: new Date().toISOString(),
       };
+      // A done task keeps its worktree: the accept step needs the diff. A
+      // failed or unchecked task has no later use. Remove its worktree.
+      if (next.state !== 'done') await runner.removeWorktree(task).catch(() => undefined);
+      return next;
     } catch (error) {
       noteFault(error);
       // Return the task in the failed state. A throw here leaves the task in
       // the queued state for ever, and the panel then shows a task that never
-      // moves. A failed task is never accepted, so its worktree goes away. A
-      // done task keeps its worktree, because the accept step needs it.
+      // moves. The worktree of a failed task goes away, because the accept
+      // step does not need it.
       await runner.removeWorktree(task).catch(() => undefined);
       return {
         ...task,
         state: 'failed',
         diff: '',
-        evidence: { typecheckOk: false, lintOk: null, diff: '' },
+        // No gate ran on this path. The evidence reports null: it never
+        // claims that a check failed.
+        evidence: { typecheckOk: null, lintOk: null, diff: '' },
         updatedAt: new Date().toISOString(),
       };
     }
@@ -154,7 +204,9 @@ async function start(): Promise<void> {
    */
   const onContext = async (): Promise<ProjectContext | null> => {
     try {
-      const made = await makeContext(root, client, commit, config.modelCheap);
+      // Read HEAD at the time of the pass. The commit of the process start can
+      // be old, and the panel would then report a stale context as fresh.
+      const made = await makeContext(root, client, currentCommit(), config.modelCheap);
       await writeContext(root, made);
       context = made;
       runner = new AgentRunner(runnerOptions, new ModelAgent(client, context));
@@ -172,17 +224,20 @@ async function start(): Promise<void> {
    * makes no commit and no branch. The worktree goes away after the apply.
    */
   const onAccept = async (task: Task): Promise<AcceptResult> => {
-    const cwd = `${worktreeDir}/${task.id.slice(0, 8)}`;
-    const diff = await worktreeDiff(cwd);
-    const result = await acceptDiff(root, diff);
-    await runner.removeWorktree(task);
+    // The task holds the measured diff. The worktree of a failed task is gone,
+    // so the stored measurement is the only copy of the repair.
+    const result = await acceptDiff(root, task.diff ?? '');
+    // A refused accept keeps the worktree. The user can try again after the
+    // working tree moves. A refusal must not destroy the only copy.
+    if (result.applied) await runner.removeWorktree(task);
     return result;
   };
 
   const service = new IndexService({
     port,
     project,
-    commit,
+    commit: currentCommit,
+    token,
     onTask,
     onContext,
     onAccept,
@@ -191,7 +246,9 @@ async function start(): Promise<void> {
   });
 
   console.info(`[browsagent] provider: ${providerLine(providerState())}`);
-  console.info(`[browsagent] context: ${contextLine(context, contextState().stale, commit)}`);
+  console.info(
+    `[browsagent] context: ${contextLine(context, contextState().stale, currentCommit())}`,
+  );
 
   const bound = await service.listen();
   console.info(`[browsagent] index service on port ${bound}`);
@@ -199,4 +256,9 @@ async function start(): Promise<void> {
   console.info('[browsagent] add @browsagent/vite-plugin to the project config');
 }
 
-void start();
+void start().catch((error: unknown) => {
+  // A busy port and a bad address are setup faults. Report the words.
+  const words = error instanceof Error ? error.message : String(error);
+  console.error(`[browsagent] The companion did not start. ${words}`);
+  process.exitCode = 1;
+});

@@ -16,8 +16,12 @@
  *    code refuses the path.
  * Step 3 is the proof. Steps 1 and 2 give a clear answer for the two common
  * mistakes.
+ *
+ * Step 3 must read the real path too. A symbolic link inside the worktree can
+ * point outside it. The real path of the link target is the thing to compare.
+ * A missing part is not a fault: write_file makes a missing directory.
  */
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, readlink, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { ToolSpec } from '@browsagent/shared';
@@ -118,24 +122,57 @@ function inside(root: string, given: unknown): PathCheck {
  * compare the real paths. A link that leaves the worktree is refused.
  *
  * A new file does not exist yet, so the resolve of the file itself fails. Then
- * the parent directory is the thing to check.
+ * the walk goes up to the nearest part that exists. A symbolic link is
+ * followed by its own text, so a dangling link is checked as well: the write
+ * call would create the target of that link.
  */
 async function insideReal(root: string, check: PathCheck): Promise<PathCheck> {
   if (!check.ok) return check;
+
+  let base: string;
   try {
-    const base = await realpath(resolve(root));
-    const target = await realpath(check.full).catch(() => realpath(dirname(check.full)));
-    const back = relative(base, target);
-    if (back === '..' || back.startsWith(`..${sep}`) || isAbsolute(back)) {
-      return {
-        ok: false,
-        text: `The path ${check.shown} leaves the worktree through a symbolic link.`,
-      };
-    }
+    base = await realpath(resolve(root));
   } catch {
     return { ok: false, text: `The path ${check.shown} cannot be resolved.` };
   }
-  return check;
+
+  let target = check.full;
+  // The walk goes up one level for each part that does not exist. The cap
+  // stops a loop.
+  for (let step = 0; step < 64; step += 1) {
+    let real: string | null = null;
+    try {
+      real = await realpath(target);
+    } catch {
+      real = null;
+    }
+    if (real !== null) {
+      const back = relative(base, real);
+      if (back === '..' || back.startsWith(`..${sep}`) || isAbsolute(back)) {
+        return {
+          ok: false,
+          text: `The path ${check.shown} leaves the worktree through a symbolic link.`,
+        };
+      }
+      return check;
+    }
+
+    const link = await lstat(target).catch(() => null);
+    if (link !== null && link.isSymbolicLink()) {
+      const text = await readlink(target).catch(() => null);
+      if (text === null) {
+        return { ok: false, text: `The path ${check.shown} cannot be resolved.` };
+      }
+      target = resolve(dirname(target), text);
+      continue;
+    }
+
+    const parent = dirname(target);
+    if (parent === target) break;
+    target = parent;
+  }
+
+  return { ok: false, text: `The path ${check.shown} cannot be resolved.` };
 }
 
 /** Resolve one path and then check the real path. */
@@ -211,6 +248,11 @@ async function readFileText(root: string, given: unknown): Promise<string> {
 async function writeFileText(root: string, given: unknown, content: unknown): Promise<string> {
   const path = await safePath(root, given);
   if (!path.ok) return path.text;
+  // The path .git is the pointer of the worktree. A write there destroys the
+  // worktree, and the damage does not show in the diff. The tool never writes it.
+  if (path.shown === '.git' || path.shown.startsWith(`.git${sep}`)) {
+    return 'The path .git is not writable. The tools change source files only.';
+  }
   if (typeof content !== 'string') {
     return 'Give the content as a text value. The tool writes the whole file.';
   }

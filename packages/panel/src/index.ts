@@ -55,10 +55,10 @@ function detailRows(task: Task): string[] {
   }
 
   if (task.evidence !== null) {
+    const typecheck =
+      task.evidence.typecheckOk === null ? 'not run' : String(task.evidence.typecheckOk);
     const lint = task.evidence.lintOk === null ? 'not run' : String(task.evidence.lintOk);
-    rows.push(
-      `<p class="card__row">typecheck: ${String(task.evidence.typecheckOk)} | lint: ${lint}</p>`,
-    );
+    rows.push(`<p class="card__row">typecheck: ${typecheck} | lint: ${lint}</p>`);
   }
 
   const diff = task.diff ?? '';

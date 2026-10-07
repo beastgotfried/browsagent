@@ -141,12 +141,18 @@ minute. When the socket is not connected, the worker calls `open()` and
 repairs it. Chrome before version 120 clamps a shorter period to one minute. A
 period of one minute is correct on every supported version.
 
-The panel asks for `{ kind: 'status' }`. The worker answers after the queue
-load:
+The panel asks for `{ kind: 'status-request' }`. The request and the report
+are two different kinds, so one panel never reads the request of another panel
+as its own state. The worker answers after the queue load:
 
 ```ts
 { kind: 'status', connected: boolean, server: string, queued: number }
 ```
+
+The worker keeps the last selection. The answer to the request carries the
+selection again, so a panel that opens after a mark can give that mark a
+problem. The panel joins the task list of the worker with the tasks that the
+socket already delivered. The newer value of each identity wins.
 
 ## The MAIN-world page bridge
 

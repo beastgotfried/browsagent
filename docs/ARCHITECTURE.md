@@ -177,6 +177,10 @@ are a summary, not the diff. The runner runs the type check and the optional
 lint after each edit. A gate that did not run reports null, and it never
 reports a pass. Read `docs/PIPELINE.md`.
 
+The companion listens on `127.0.0.1` only. It refuses a socket and an HTTP
+request that does not hold the shared token of the extension. Read
+`docs/CONTEXT.md`.
+
 ## The rule for the agent
 
 `INSTRUCTIONS` in `packages/agent-runner/src/agent.ts` gives the agent its

@@ -24,7 +24,10 @@ export type ToBackground =
   // The panel asks the worker for a new context pass.
   | { kind: 'recontext' }
   | { kind: 'error'; message: string }
-  | { kind: 'status' }
+  // The panel asks for the worker state. The worker answers with `status`.
+  // The request and the report are two different kinds, so a panel never
+  // reads the request of another panel as its own state.
+  | { kind: 'status-request' }
   | { kind: 'overlay-state'; active: boolean };
 
 /**
@@ -37,6 +40,7 @@ export type ToBackground =
 export type FromBackground =
   | { kind: 'overlay'; active: boolean }
   | { kind: 'overlay-query' }
+  | { kind: 'indexed'; count: number }
   | { kind: 'status'; connected: boolean; server: string; queued: number }
   | { kind: 'selected'; selection: Selection }
   | { kind: 'record'; record: ElementRecord }

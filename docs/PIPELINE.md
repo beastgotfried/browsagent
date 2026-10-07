@@ -127,8 +127,10 @@ A stale context does not block a repair. The panel shows the stale mark.
    holds `styles: []` and `useSites: []`. The confidence value is `low` when
    the live record or the source file is absent, `high` when the style
    callback gives rules, and `medium` in the other cases.
-9. `makeTask` makes the structured task. `TaskStore.put` stores it. The
-   companion sends `{ kind: 'task' }` to every client.
+9. `makeTask` makes the structured task. `Task.route` holds the address of the
+   page at the time of the mark. The source file stays in `Task.record.src`.
+   `TaskStore.put` stores it. The companion sends `{ kind: 'task' }` to every
+   client.
 10. `GET /tasks` returns every task.
 
 ### The record holds
@@ -167,7 +169,11 @@ A stale context does not block a repair. The panel shows the stale mark.
 3. `AgentRunner.makeWorktree` makes one worktree for the task. The tree uses
    the commit of the mark. The runner uses `HEAD` when the task holds no
    commit. The worktree lives in
-   `<project>/.browsagent/worktrees/<first 8 characters of the task id>`.
+   `<project>/.browsagent/worktrees/<first 8 characters of the task id>`. A
+   failed `git worktree add` stops the task with the words of git. The runner
+   then runs the prepare command of the project in the worktree. The CLI sets
+   `pnpm install --frozen-lockfile --prefer-offline`, because a fresh worktree
+   holds no `node_modules`.
 4. `ModelAgent.plan` in `packages/agent-runner/src/agent.ts` asks the model
    for a short plan and the files. This call holds no tools.
 5. `ModelAgent.edit` runs the tool loop. The agent reads and writes files in
@@ -175,24 +181,36 @@ A stale context does not block a repair. The panel shows the stale mark.
    `packages/agent-runner/src/tools.ts`. Read `docs/AGENT.md`.
 6. `AgentRunner.checkCode` runs the type check. It runs the lint only when a
    lint command is set. The type check is required: the constructor of
-   `AgentRunner` throws when the command is empty.
-7. The loop runs the edit again while a gate that ran failed and the try count
-   is under `maxTries`. The CLI sets 3 tries. `Task.tries` counts the tries.
+   `AgentRunner` throws when the command is empty. The check command of the CLI
+   runs the build first, because a fresh worktree holds no build output and a
+   workspace package without its `dist` has no types for its importers.
+7. The loop runs the edit again while a gate that ran failed or the diff is
+   empty, and the try count is under `maxTries`. The CLI sets 3 tries.
+   `Task.tries` counts the tries.
 8. `AgentRunner.run` measures the diff of the worktree with `worktreeDiff`
    after each edit. The words of the agent are a summary, not the diff. The
-   runner returns the plan, the state, the evidence, and the measured diff.
+   measurement records an intent to add for every untracked path first, so a
+   new file appears in the diff. The runner returns the plan, the state, the
+   evidence, and the measured diff. A failed git command stops the task: an
+   empty answer is not a measurement.
 9. `onTask` measures the diff a second time with `worktreeDiff` in
-   `packages/agent-runner/src/accept.ts`. The two measurements must agree. It
-   writes the state, the plan, the files, the measured diff, and the evidence
-   into the task.
+   `packages/agent-runner/src/accept.ts`. The two measurements must agree. A
+   difference fails the task, because the diff is the only evidence that the
+   repair is correct. On the normal path it writes the state, the plan, the
+   files, the measured diff, and the evidence into the task.
 10. The companion stores the changed task and sends it to every client. The
-    side panel shows the state, the diff, and the **Accept the repair**
-    button.
+    side panel shows the state, the check result, the diff, and the **Accept
+    the repair** button. A `done` task keeps its worktree. A `failed` or
+    `unchecked` task loses it, because the accept step does not need it.
 11. The user accepts. The panel sends `{ kind: 'accept', taskId }`. The
-    companion calls the `onAccept` hook. `acceptDiff` in
+    companion refuses a task that a repair still uses, such as a `queued`
+    task. The companion calls the `onAccept` hook. `acceptDiff` in
     `packages/agent-runner/src/accept.ts` applies the patch to the working tree
-    with `git apply --check` and then `git apply`. `onAccept` removes the
-    worktree. The tool makes no commit and no branch.
+    with `git apply --check` and then `git apply`. The patch is the measured
+    diff that the task holds, so the accept works after the worktree is gone.
+    `onAccept` removes the worktree after an applied patch. A refused patch
+    keeps the worktree, so the user can try again. The tool makes no commit
+    and no branch.
 
 The task holds the plan and the files. The side panel does not show the plan.
 There is no agreement step.
@@ -218,11 +236,14 @@ user message.
 - A fault stops the repair. The state is `failed`. `AgentRunner.run` catches a
   fault from the agent edit and keeps the measured diff. `onTask` catches a
   fault that escapes the runner, removes the worktree, and writes an empty
-  diff. A `done` task keeps its worktree until the accept step.
+  diff. A `done` task keeps its worktree until the accept step. A `failed` or
+  `unchecked` task loses its worktree at once.
 - The type check command does not start. Then no gate ran, and the state is
-  `unchecked`.
+  `unchecked`. The evidence reports `typecheckOk: null`. It never claims a
+  failed check that never ran.
 - Two agents change the same file. Each worktree is separate. The second
-  accept fails at `git apply --check`, because the working tree moved.
+  accept fails at `git apply --check`, because the working tree moved. That
+  refusal keeps the worktree of the task, so the user can try again.
 - The project has no lint. Then the lint does not run. The evidence reports
   `lintOk: null`. The tool does not report a pass for a gate that did not run.
 - The context is stale. Then the panel shows the stale mark. The repair still
@@ -234,9 +255,10 @@ The check is the type check and the lint. The type check is required. The lint
 is optional, because a project can have no lint. A gate that did not run
 reports null. It never reports a pass.
 
-The state names the result: `done` when the agent made an edit and every gate
-that ran passed, `failed` when a gate failed after the last try or the agent
-threw a fault, and `unchecked` when no gate ran.
+The state names the result: `done` when the agent made an edit, the diff is
+not empty, and every gate that ran passed. It is `failed` when a gate failed
+after the last try, when the diff stayed empty, or when the agent threw a
+fault. It is `unchecked` when no gate ran.
 
 There is no screenshot step and no comparison at a screen width.
 

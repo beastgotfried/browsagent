@@ -51,7 +51,7 @@ read the whole repository.
 | The config files | `vite.config.*`, `next.config.*`, `tsconfig.json`, `tailwind.config.*`, `postcss.config.*` |
 | The entry points | `src/main.*`, `src/App.*`, `app/page.*`, and `pages/index.*` |
 | The route files | the first 10 files below a `routes`, `app`, or `pages` directory |
-| The API calls | the lines that match `fetch(`, `axios`, or `/api/` in `packages/` and `examples/` |
+| The API calls | the lines that call `fetch(` or `axios`, or that hold `/api/`, in `packages/` and `examples/` |
 
 The pass does not read the last context. It writes a new document from the
 sample.
@@ -86,7 +86,12 @@ Examples of an invariant:
 <project>/.browsagent/context.json   the record of the pass
 ```
 
-`context.json` holds the commit, the model, the token count, and the time.
+`context.json` holds the commit, the model, the token count, the time, and
+the digest of the document. The digest pairs the two files: a reader refuses a
+document from one pass and a record from another pass.
+
+The token count is an estimate. The tool has no tokenizer. It counts one token
+for every four characters of the document.
 
 **Add `.browsagent/` to the ignore list of the project.** The document is
 derived data. It is made from the tree.
@@ -240,3 +245,21 @@ The panel shows one of three states:
 | `key bad` | The provider refused the key. The panel shows the words of the fault |
 
 The panel never shows the key.
+
+A refused call shows the words of the provider in the panel. A guardrail block
+appears as a guardrail block. It never appears as a network fault. Read the
+guardrail block above.
+
+### The companion token
+
+The extension makes a token and shows it on its options page. The companion
+refuses a socket and an HTTP request that does not hold that token. Without the
+check, any page or process on the machine can spend the key of the user and
+apply a patch to the working tree.
+
+The companion reads the token in this order:
+
+1. the environment variable `BROWSAGENT_TOKEN`,
+2. the `token` value in `<project>/.browsagent/config.json`.
+
+The companion does not start without a token. It listens on `127.0.0.1` only.

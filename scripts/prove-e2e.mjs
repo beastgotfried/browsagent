@@ -34,8 +34,11 @@ const { WebSocket } = serviceRequire('ws');
 
 const HOST = '127.0.0.1';
 const PORT = 4517;
-const STATE_URL = `http://${HOST}:${PORT}/state`;
-const SOCKET_URL = `ws://${HOST}:${PORT}/mark?token=test`;
+// The companion refuses a caller without the shared token. The script holds
+// the same value in the environment of the child process.
+const TOKEN = 'proof-token';
+const STATE_URL = `http://${HOST}:${PORT}/state?token=${TOKEN}`;
+const SOCKET_URL = `ws://${HOST}:${PORT}/mark?token=${TOKEN}`;
 
 const PORT_TIMEOUT_MS = 30_000;
 const SOCKET_TIMEOUT_MS = 10_000;
@@ -154,7 +157,10 @@ async function providerWords() {
 function taskFailWords() {
   const bits = [];
   const evidence = task?.evidence ?? null;
-  if (evidence !== null) bits.push(`typecheckOk ${evidence.typecheckOk}`);
+  if (evidence !== null) {
+    const typecheck = evidence.typecheckOk === null ? 'did not run' : String(evidence.typecheckOk);
+    bits.push(`typecheckOk ${typecheck}`);
+  }
   if (typeof task?.plan === 'string' && task.plan !== '') {
     bits.push(`the plan: ${task.plan.slice(0, 160)}`);
   }
@@ -192,8 +198,9 @@ function printDiff(diff) {
 function printTaskInfo() {
   const evidence = task?.evidence ?? null;
   if (evidence !== null) {
+    const typecheck = evidence.typecheckOk === null ? 'did not run' : String(evidence.typecheckOk);
     const lint = evidence.lintOk === null ? 'did not run' : String(evidence.lintOk);
-    console.log(redacted(`  evidence: typecheckOk ${evidence.typecheckOk}, lintOk ${lint}`));
+    console.log(redacted(`  evidence: typecheckOk ${typecheck}, lintOk ${lint}`));
   }
   if (task?.state !== 'done') {
     console.log(
@@ -207,7 +214,11 @@ function printTaskInfo() {
 function startCompanion() {
   child = spawn(process.execPath, [companionEntry], {
     cwd: root,
-    env: { ...process.env, BROWSAGENT_PORT: String(PORT) },
+    env: {
+      ...process.env,
+      BROWSAGENT_PORT: String(PORT),
+      BROWSAGENT_TOKEN: TOKEN,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   exitPromise = new Promise((resolveExit) => {

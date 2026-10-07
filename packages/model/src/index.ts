@@ -6,4 +6,4 @@
  */
 export { ModelClient, ProviderError } from './client.js';
 export type { ChatClient, ProviderErrorCode } from './client.js';
-export { hasKey, loadProviderConfig } from './config.js';
+export { hasKey, loadProviderConfig, loadToken } from './config.js';

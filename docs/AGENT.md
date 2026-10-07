@@ -49,8 +49,10 @@ JSON.
    The tool message holds the identity of the call.
 4. The loop stops when the answer holds no tool call. The words of the answer
    are the result.
-5. The loop stops after 12 turns in every other case. `MAX_TURNS` in `agent.ts`
-   is 12.
+5. The loop stops after 12 turns in every other case. It then reports a
+   fault: the model did not stop, and its last tool result never reached it.
+   `MAX_TURNS` in `agent.ts` is 12. The runner marks the task `failed` and
+   keeps the measured diff.
 
 One turn is one model call and its tool results. The cap stops a loop that
 never ends. The cap keeps the cost of one repair small.
@@ -69,8 +71,11 @@ there is no fourth.
 Every path is relative to the worktree root. Every path must stay inside the
 root. The function `inside` refuses an absolute path, a path with a `..` part,
 and a path that resolves outside the root. The function `safePath` then
-resolves the real path. A symbolic link that leaves the worktree is refused.
-A path that cannot be resolved is refused.
+resolves the real path. A symbolic link that leaves the worktree is refused,
+and a dangling link is followed by its own text, because a write call would
+create the target of that link. A missing parent directory is allowed:
+`write_file` makes it. The path `.git` is refused in every case: a write there
+destroys the worktree of the task.
 
 A bad tool name and a bad argument give a text answer. The call does not
 throw. The model reads the text and tries again.
@@ -92,11 +97,12 @@ and cannot claim a pass.
    constructor of `AgentRunner` throws when the command is empty.
 2. `checkCode` runs the lint only when a lint command is set. A lint that did
    not run gives `lintOk: null`.
-3. The runner runs the edit again while a gate that ran failed and the try
-   count is under `maxTries`. The CLI sets 3 tries.
-4. The state is `done` when the agent made an edit and every gate that ran
-   passed, `failed` when a gate failed after the last try or the agent threw a
-   fault, and `unchecked` when no gate ran.
+3. The runner runs the edit again while a gate that ran failed or the diff is
+   empty, and the try count is under `maxTries`. The CLI sets 3 tries.
+4. The state is `done` when the agent made an edit, the diff is not empty, and
+   every gate that ran passed. The state is `failed` when a gate failed after
+   the last try, when the diff stayed empty, or when the agent threw a fault.
+   The state is `unchecked` when no gate ran.
 
 ## The diff
 
@@ -106,15 +112,21 @@ The diff is the measure of the repair. There is no picture check (D5).
 
 `AgentRunner.run` reads `git diff` in the worktree with `worktreeDiff` in
 `packages/agent-runner/src/accept.ts`, after each edit. The words of
-`ModelAgent.edit` are a summary, not the diff. The CLI measures the diff a
-second time and compares the two values. A new file that no `git add` records
-does not appear. The user reads the diff in the side panel.
+`ModelAgent.edit` are a summary, not the diff. The measurement records an
+intent to add for every untracked path first, so a new file appears in the
+diff. The CLI measures the diff a second time and compares the two values. A
+difference fails the task: the diff is the only evidence of the repair. The
+user reads the diff in the side panel.
 
 ## The accept
 
 The agent never lands a commit (D9). The user presses **Accept the repair**.
 A `done` task keeps its worktree until this step. `onTask` removes the
-worktree when a fault escapes the runner. Example: the worktree call fails, or
-the plan call fails. The panel sends `{ kind: 'accept', taskId }`. `acceptDiff`
-applies the patch to the working tree with `git apply --check` and then
-`git apply`. The tool makes no commit and no branch.
+worktree of a `failed` or `unchecked` task: the accept step does not need it.
+The CLI also removes the worktree when a fault escapes the runner. Example:
+the worktree call fails, or the plan call fails. The panel sends
+`{ kind: 'accept', taskId }`. The accept step uses the measured diff that the
+task holds, so it works after the worktree is gone. `acceptDiff` applies the
+patch to the working tree with `git apply --check` and then `git apply`. The
+tool makes no commit and no branch. A refused patch keeps the worktree: the
+user can try again after the working tree moves.

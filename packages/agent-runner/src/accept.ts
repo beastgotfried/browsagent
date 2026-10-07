@@ -20,17 +20,10 @@ import { join } from 'node:path';
 
 import type { AcceptResult } from '@browsagent/shared';
 
-import { run } from './index.js';
-import type { CommandResult } from './index.js';
+import { commandWords, run } from './index.js';
 
 /** The name of the patch file inside the temporary directory. */
 const PATCH_FILE = 'repair.diff';
-
-/** The words of one git command. Git writes a refusal to stderr. */
-function gitWords(result: CommandResult): string {
-  const words = (result.stderr.trim() === '' ? result.stdout : result.stderr).trim();
-  return words === '' ? 'git gave no message.' : words;
-}
 
 /** The words of one fault value. */
 function faultWords(error: unknown): string {
@@ -93,10 +86,10 @@ export async function acceptDiff(root: string, diff: string): Promise<AcceptResu
   const patch = join(dir, PATCH_FILE);
   try {
     const check = await run('git', ['apply', '--check', patch], root);
-    if (check.code !== 0) return { applied: false, files, message: gitWords(check) };
+    if (check.code !== 0) return { applied: false, files, message: commandWords(check) };
 
     const apply = await run('git', ['apply', patch], root);
-    if (apply.code !== 0) return { applied: false, files, message: gitWords(apply) };
+    if (apply.code !== 0) return { applied: false, files, message: commandWords(apply) };
 
     return { applied: true, files, message: appliedWords(files) };
   } finally {
@@ -109,10 +102,27 @@ export async function acceptDiff(root: string, diff: string): Promise<AcceptResu
  *
  * D5: the diff is the measure of a repair. There is no picture check.
  *
- * Plain `git diff` reads the tracked files of the worktree. It does not read
- * a new file that no `git add` records.
+ * A plain `git diff` reads the tracked files of the worktree. It does not
+ * read a new file that no `git add` records. So the function records an
+ * intent to add for every untracked path first. That step writes the index of
+ * the worktree only: it stages no content and it makes no commit. Then the
+ * diff holds a new file too.
+ *
+ * A failed git command throws. An empty answer is not a measurement.
  */
 export async function worktreeDiff(cwd: string): Promise<string> {
+  const recorded = await run('git', ['add', '--intent-to-add', '--all'], cwd);
+  if (!recorded.started || recorded.code !== 0) {
+    throw new Error(
+      `The tool cannot record the new files of the worktree. ${commandWords(recorded)}`,
+    );
+  }
+
   const result = await run('git', ['diff'], cwd);
+  if (!result.started || result.code !== 0) {
+    throw new Error(
+      `The tool cannot measure the diff of the worktree. ${commandWords(result)}`,
+    );
+  }
   return result.stdout;
 }

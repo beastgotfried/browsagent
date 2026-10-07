@@ -158,8 +158,11 @@ export type TaskState =
 
 /** The check result of one task. */
 export interface Evidence {
-  /** True when the type check passed. The type check is a required gate. */
-  typecheckOk: boolean;
+  /**
+   * True when the type check passed. Null when the type check did not run.
+   * A gate that did not run never reports a pass and never reports a failure.
+   */
+  typecheckOk: boolean | null;
   /** True when the lint passed. Null when the lint did not run. */
   lintOk: boolean | null;
   /** The diff of the repair. The user reads this diff. */
@@ -288,7 +291,10 @@ export interface ProjectContext {
   commit: string;
   /** The model that made the context. */
   model: string;
-  /** The token count of the document. */
+  /**
+   * The token count of the document. The tool has no tokenizer. It counts one
+   * token for every four characters.
+   */
   tokens: number;
   /** The time of the context pass. */
   madeAt: string;

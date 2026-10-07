@@ -39,6 +39,12 @@ export function run(command: string, args: string[], cwd: string): Promise<Comma
   });
 }
 
+/** The words of one command. The command writes a refusal to stderr. */
+export function commandWords(result: CommandResult): string {
+  const words = (result.stderr.trim() === '' ? result.stdout : result.stderr).trim();
+  return words === '' ? 'The command gave no message.' : words;
+}
+
 export interface RunnerOptions {
   /** The root of the project. */
   root: string;
@@ -50,6 +56,12 @@ export interface RunnerOptions {
   typecheck: string;
   /** The command for the lint. Optional: a project can have no lint. */
   lint?: string;
+  /**
+   * A command that prepares the worktree after its creation. Example: an
+   * install command. A fresh worktree holds no dependencies. A failed prepare
+   * stops the task. Optional.
+   */
+  prepare?: string;
 }
 
 export interface AgentPlan {
@@ -120,7 +132,20 @@ export class AgentRunner {
     // The commit of the mark gives the tree that the user sees. HEAD is the
     // fallback for a task without a commit.
     const commit = task.commit === '' ? 'HEAD' : task.commit;
-    await run('git', ['worktree', 'add', dir, commit], this.options.root);
+    const made = await run('git', ['worktree', 'add', dir, commit], this.options.root);
+    if (!made.started || made.code !== 0) {
+      // A missing worktree makes every later tool call fail. Report the fault
+      // here, where the words of git are still at hand.
+      throw new Error(`The tool cannot make the worktree for the task. ${commandWords(made)}`);
+    }
+
+    const prepare = this.options.prepare?.trim();
+    if (prepare !== undefined && prepare !== '') {
+      const ready = await run('sh', ['-c', prepare], dir);
+      if (!ready.started || ready.code !== 0) {
+        throw new Error(`The prepare command failed in the worktree. ${commandWords(ready)}`);
+      }
+    }
     return dir;
   }
 
@@ -160,8 +185,10 @@ export class AgentRunner {
    * the try count is under maxTries.
    *
    * The state tells the truth about the check:
-   * - `done`: the agent made an edit and every gate that ran passed.
-   * - `failed`: a gate failed after maxTries, or the agent threw a fault.
+   * - `done`: the agent made an edit, the diff is not empty, and every gate
+   *   that ran passed.
+   * - `failed`: a gate failed after maxTries, the diff stayed empty, or the
+   *   agent threw a fault.
    * - `unchecked`: no gate ran.
    */
   async run(
@@ -176,30 +203,37 @@ export class AgentRunner {
     let check: CheckResult = { typecheckOk: false, lintOk: null, ran: false };
     let agentThrew = false;
 
-    try {
-      do {
-        // Count the attempt on the task. The task store holds this object.
-        task.tries += 1;
-        await this.agent.edit(task, cwd);
-        // The diff is evidence. Evidence is measured, never reported. The
-        // agent returns a summary, and that summary is often null. So the
-        // runner measures the diff itself, from the worktree.
-        diff = await worktreeDiff(cwd);
-        check = await this.checkCode(cwd);
-      } while (check.ran && !passed(check) && task.tries < maxTries);
-    } catch {
-      agentThrew = true;
+    // The try cap counts the tries that the task already spent. A task with no
+    // try left makes no edit.
+    if (task.tries < maxTries) {
       try {
-        // A partial edit can still be in the worktree. Measure it, so the
-        // evidence shows what the agent really did before it failed.
-        diff = await worktreeDiff(cwd);
+        do {
+          // Count the attempt on the task. The task store holds this object.
+          task.tries += 1;
+          await this.agent.edit(task, cwd);
+          // The diff is evidence. Evidence is measured, never reported. The
+          // agent returns a summary, and that summary is often null. So the
+          // runner measures the diff itself, from the worktree.
+          diff = await worktreeDiff(cwd);
+          check = await this.checkCode(cwd);
+          // A repair with no change is not a repair. Try again.
+        } while (check.ran && (!passed(check) || diff.trim() === '') && task.tries < maxTries);
       } catch {
-        // The worktree is gone or git failed. Keep the last measurement.
+        agentThrew = true;
+        try {
+          // A partial edit can still be in the worktree. Measure it, so the
+          // evidence shows what the agent really did before it failed.
+          diff = await worktreeDiff(cwd);
+        } catch {
+          // The worktree is gone or git failed. Keep the last measurement.
+        }
       }
     }
 
     const evidence: Evidence = {
-      typecheckOk: check.typecheckOk,
+      // A gate that did not run reports null. It never reports a pass and it
+      // never reports a failure.
+      typecheckOk: check.ran ? check.typecheckOk : null,
       lintOk: check.lintOk,
       diff,
     };
@@ -207,7 +241,8 @@ export class AgentRunner {
     let state: TaskState = 'failed';
     if (!agentThrew) {
       if (!check.ran) state = 'unchecked';
-      else if (passed(check)) state = 'done';
+      // An empty diff is no repair. The state must not say done.
+      else if (passed(check) && diff.trim() !== '') state = 'done';
     }
 
     return { evidence, diff, plan, state };

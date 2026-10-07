@@ -15,17 +15,37 @@ import {
   type Selection,
   type ServerToClient,
   type Task,
+  type TaskState,
 } from '@browsagent/shared';
 import { StyleResolver } from '@browsagent/style-resolver';
 
 import { Index, TaskStore } from './store.js';
 
+/** The address of the companion. A local tool listens on the loopback only. */
+const HOST = '127.0.0.1';
+
+/**
+ * The states of a task that a repair still uses. The service does not accept
+ * such a task: the accept step removes the worktree that the repair runs in.
+ */
+const RUNNING_STATES: ReadonlySet<TaskState> = new Set([
+  'queued',
+  'working',
+  'waiting',
+  'verifying',
+]);
+
 export interface ServiceOptions {
   port?: number;
   /** The project name. */
   project: string;
-  /** The current commit. */
-  commit: string;
+  /** A function that returns the current commit. The service calls it for each task. */
+  commit: () => string;
+  /**
+   * The shared token. The service refuses a socket and a request that holds a
+   * different token. The service answers every caller when the value is absent.
+   */
+  token?: string;
   /** A function to get the CSS rules of one node. Can be null in a test. */
   styles?: (inst: string) => Promise<ElementRecord['styles']>;
   /** A function to find all use sites of one component. */
@@ -77,6 +97,8 @@ export class IndexService {
   private readonly clients = new Set<WebSocket>();
   private http: ReturnType<typeof createServer> | null = null;
   private wss: WebSocketServer | null = null;
+  /** True while one context pass runs. A second pass must not overlap the first. */
+  private contextPassRunning = false;
 
   constructor(private readonly options: ServiceOptions) {}
 
@@ -107,9 +129,10 @@ export class IndexService {
       ? await this.options.useSites(stamp.component)
       : [];
 
-    // The confidence measures the trust in the source position. It does not
-    // count the style rules. A node with no live record or no source file has
-    // no certain position.
+    // The confidence measures the trust in the source position. A node with a
+    // style rule from the style callback is certain. A node with no live
+    // record or no source file has no certain position. The value does not
+    // count the style rules.
     const confidence: ElementRecord['confidence'] =
       record === null || stamp.src.file.trim() === ''
         ? 'low'
@@ -139,14 +162,14 @@ export class IndexService {
     };
   }
 
-  /** Make one task for one agent. */
-  makeTask(record: ElementRecord, problem: Problem): Task {
+  /** Make one task for one agent. The route is the address of the marked page. */
+  makeTask(record: ElementRecord, problem: Problem, route: string): Task {
     const now = new Date().toISOString();
     return {
       id: randomUUID(),
       project: this.options.project,
-      route: record.src.file,
-      commit: this.options.commit,
+      route,
+      commit: this.options.commit(),
       problem,
       record,
       state: 'queued',
@@ -179,17 +202,48 @@ export class IndexService {
     const record = await this.recordFrom(selection);
     if (problem === null) return { kind: 'record', record };
 
-    const task = this.makeTask(record, problem);
+    // The route is the page that the user marked. The source file lives in the
+    // record. The page address is the value that the panel shows.
+    const route = selection.tabUrl.trim() === '' ? record.src.file : selection.tabUrl;
+    const task = this.makeTask(record, problem, route);
     this.tasks.put(task);
     this.broadcast({ kind: 'task', task });
 
     const hook = this.options.onTask;
-    if (hook === undefined) return null;
+    if (hook === undefined) {
+      // A task must not stay in the queued state without a hook to run it.
+      this.failTask(task);
+      this.broadcast({
+        kind: 'error',
+        message: 'The repair hook is not set. The tool made no repair.',
+      });
+      return null;
+    }
 
-    const repaired = await hook(task);
+    let repaired: Task;
+    try {
+      repaired = await hook(task);
+    } catch (error) {
+      // The task is stored. A fault must move it out of the queued state, so
+      // the panel does not show a task that never moves.
+      this.failTask(task);
+      throw error;
+    }
     this.tasks.put(repaired);
     if (repaired !== task) this.broadcast({ kind: 'task', task: repaired });
     return null;
+  }
+
+  /** Move one task to the failed state. The service sends the changed task. */
+  private failTask(task: Task): Task {
+    const failed: Task = {
+      ...task,
+      state: 'failed',
+      updatedAt: new Date().toISOString(),
+    };
+    this.tasks.put(failed);
+    this.broadcast({ kind: 'task', task: failed });
+    return failed;
   }
 
   /** Apply the patch of one accepted task. The answer goes to every client. */
@@ -252,6 +306,16 @@ export class IndexService {
         });
         return;
       }
+      if (RUNNING_STATES.has(task.state)) {
+        // A running repair uses the worktree. An accept now removes it.
+        send(socket, {
+          kind: 'error',
+          message:
+            `The task ${message.taskId} is in the "${task.state}" state. ` +
+            'The tool accepts a task that stopped.',
+        });
+        return;
+      }
       void this.acceptTask(task).catch((error: unknown) => {
         this.broadcast({ kind: 'error', message: faultWords(error) });
       });
@@ -259,22 +323,54 @@ export class IndexService {
     }
 
     if (message.kind === 'recontext') {
-      void this.runContextPass().catch((error: unknown) => {
-        this.broadcast({ kind: 'error', message: faultWords(error) });
-      });
+      if (this.contextPassRunning) {
+        // Two passes write the same two files. One pass at a time keeps the
+        // document and the record in step.
+        send(socket, {
+          kind: 'error',
+          message: 'A context pass is already running. Wait for the answer.',
+        });
+        return;
+      }
+      this.contextPassRunning = true;
+      void this.runContextPass()
+        .catch((error: unknown) => {
+          this.broadcast({ kind: 'error', message: faultWords(error) });
+        })
+        .finally(() => {
+          this.contextPassRunning = false;
+        });
     }
+  }
+
+  /** True when the request carries the shared token. True when no token is set. */
+  private tokenOk(request: IncomingMessage): boolean {
+    const token = this.options.token;
+    if (token === undefined || token === '') return true;
+    if (request.headers['x-browsagent-token'] === token) return true;
+    const given = new URL(request.url ?? '/', `http://${HOST}`).searchParams.get('token');
+    return given === token;
   }
 
   async listen(): Promise<number> {
     const port = this.options.port ?? DEFAULT_PORT;
 
-    this.http = createServer((request: IncomingMessage, response: ServerResponse) => {
-      if (request.url === '/tasks') {
+    const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+      // The client must give the shared token. Without this check any page or
+      // process can read the tasks and spend the key of the user.
+      if (!this.tokenOk(request)) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: 'The token is absent or wrong.' }));
+        return;
+      }
+      // The path holds no query string. The token sits in the query string.
+      const path = (request.url ?? '/').split('?')[0] ?? '/';
+      if (path === '/tasks') {
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify(this.tasks.all()));
         return;
       }
-      if (request.url === '/state') {
+      if (path === '/state') {
         const provider = this.options.providerState?.() ?? null;
         const context = this.options.contextState?.() ?? null;
         response.writeHead(200, { 'content-type': 'application/json' });
@@ -286,8 +382,15 @@ export class IndexService {
       response.writeHead(404);
       response.end();
     });
+    this.http = server;
 
-    this.wss = new WebSocketServer({ server: this.http });
+    this.wss = new WebSocketServer({
+      server,
+      // The socket carries the same token. The path /mark?token=... holds it.
+      verifyClient: (info: { req: IncomingMessage }) => this.tokenOk(info.req),
+    });
+    // The server reports the fault of one client. It must not stop the process.
+    this.wss.on('error', () => undefined);
     this.wss.on('connection', (socket) => {
       this.clients.add(socket);
 
@@ -304,10 +407,17 @@ export class IndexService {
           send(socket, { kind: 'error', message: 'bad message' });
         }
       });
+      // A bad frame emits an error on the socket. An error with no listener
+      // stops the whole companion. Close the one socket instead.
+      socket.on('error', () => socket.close());
       socket.on('close', () => this.clients.delete(socket));
     });
 
-    await new Promise<void>((resolve) => this.http?.listen(port, resolve));
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      // The loopback address only. No other machine reaches the companion.
+      server.listen(port, HOST, () => resolve());
+    });
     return port;
   }
 

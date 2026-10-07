@@ -12,7 +12,7 @@ import {
 import { browser } from 'wxt/browser';
 
 import type { FromBackground, Selection, ToBackground } from '../../src/bus.js';
-import { getServer } from '../../src/config.js';
+import { getServer, getToken } from '../../src/config.js';
 
 const state = document.getElementById('state');
 const record = document.getElementById('record');
@@ -32,6 +32,12 @@ let lastSelection: Selection | null = null;
 
 /** The tasks of the companion. The list read and the task messages fill it. */
 let tasks: Task[] = [];
+
+/**
+ * The states of a task that a repair still uses. The companion refuses to
+ * accept such a task: the accept step removes the worktree.
+ */
+const RUNNING_STATES = new Set<Task['state']>(['queued', 'working', 'waiting', 'verifying']);
 
 /** The identities of the applied tasks. The accept button of one card goes dark. */
 const applied = new Set<string>();
@@ -147,7 +153,10 @@ function paintProvider(provider: ProviderState | null): void {
     providerLine.title = 'The companion did not report the provider state.';
     return;
   }
-  providerLine.textContent = providerWords(provider.status);
+  // A refused call can report a guardrail block, a missing credit, or a
+  // network fault. Show the words of the provider. A short state alone hides
+  // the reason.
+  providerLine.textContent = provider.fault ?? providerWords(provider.status);
   providerLine.title = providerNote(provider);
 }
 
@@ -169,7 +178,8 @@ interface StateReply {
 async function loadState(): Promise<void> {
   try {
     const server = await getServer();
-    const reply = await fetch(`${httpBase(server)}/state`);
+    const token = await getToken();
+    const reply = await fetch(`${httpBase(server)}/state?token=${encodeURIComponent(token)}`);
     if (!reply.ok) return;
     const report = (await reply.json()) as StateReply;
     if (report.context !== null) {
@@ -229,6 +239,36 @@ function putTask(task: Task): void {
   render();
 }
 
+/**
+ * Join one list of tasks with the tasks that the socket already delivered.
+ *
+ * A list read can start before a task arrives. The read then holds an older
+ * task or no task. The join keeps the newer value of each identity. A plain
+ * replace would erase a task that the socket just delivered.
+ */
+function mergeTasks(list: Task[]): void {
+  const byId = new Map<string, Task>();
+  const order: string[] = [];
+
+  const add = (task: Task): void => {
+    const old = byId.get(task.id);
+    if (old === undefined) {
+      byId.set(task.id, task);
+      order.push(task.id);
+      return;
+    }
+    if (task.updatedAt > old.updatedAt) byId.set(task.id, task);
+  };
+
+  for (const task of tasks) add(task);
+  for (const task of list) add(task);
+
+  tasks = order
+    .map((id) => byId.get(id))
+    .filter((task): task is Task => task !== undefined);
+  render();
+}
+
 /** Show the answer of the accept step. The applied task keeps a dark button. */
 function showAccepted(result: AcceptResult, task: Task): void {
   if (result.applied) applied.add(task.id);
@@ -243,18 +283,31 @@ function card(task: Task): HTMLLIElement {
   const label = el('span', task.state);
   label.className = 'pill';
   const head = el('p', `${task.record.src.file}:${task.record.src.line}`);
+  const confidence = el('span', `confidence: ${task.record.confidence}`);
+  head.prepend(confidence);
   head.prepend(label);
   item.append(head);
 
   item.append(el('p', `${task.problem.type}: ${task.problem.text}`));
+
+  // The check result is evidence. Show it: a state alone does not say which
+  // gate ran and which gate passed.
+  if (task.evidence !== null) {
+    const typecheck =
+      task.evidence.typecheckOk === null ? 'not run' : String(task.evidence.typecheckOk);
+    const lint = task.evidence.lintOk === null ? 'not run' : String(task.evidence.lintOk);
+    item.append(el('p', `typecheck: ${typecheck} | lint: ${lint}`));
+  }
 
   const diffText = task.diff ?? '';
   if (diffText.trim() !== '') item.append(el('pre', diffText));
 
   const accept = el('button', 'Accept the repair');
   accept.type = 'button';
-  // No diff or an applied task gives the button nothing to do.
-  accept.disabled = diffText.trim() === '' || applied.has(task.id);
+  // No diff, an applied task, and a running repair all give the button nothing
+  // to do.
+  accept.disabled =
+    diffText.trim() === '' || applied.has(task.id) || RUNNING_STATES.has(task.state);
   accept.addEventListener('click', () => acceptTask(task.id));
   item.append(accept);
 
@@ -268,7 +321,7 @@ function render(): void {
 
 function ask(): void {
   void browser.runtime
-    .sendMessage({ kind: 'status' } satisfies ToBackground)
+    .sendMessage({ kind: 'status-request' } satisfies ToBackground)
     .then((reply: unknown) => {
       const typed = reply as FromBackground | undefined;
       if (typed?.kind === 'status') paint(typed.connected, typed.server, typed.queued);
@@ -286,11 +339,13 @@ browser.runtime.onMessage.addListener((message: unknown) => {
     // A provider fault can change the provider state. Read it again.
     void loadState();
   }
-  if (typed.kind === 'task') putTask(typed.task);
-  if (typed.kind === 'task-list') {
-    tasks = typed.tasks;
-    render();
+  if (typed.kind === 'task') {
+    putTask(typed.task);
+    // A repair can set a provider fault. Read the provider state again, so a
+    // guardrail refusal reaches the user.
+    void loadState();
   }
+  if (typed.kind === 'task-list') mergeTasks(typed.tasks);
   if (typed.kind === 'accepted') showAccepted(typed.result, typed.task);
   if (typed.kind === 'context') {
     paintContext(typed.context, typed.stale);

@@ -3,9 +3,12 @@
  *
  * The context lives in <root>/.browsagent. The markdown file holds the
  * document. The JSON file holds the record of the pass. The record holds the
- * commit, the model, the token count, and the time.
+ * commit, the model, the token count, the time, and the digest of the
+ * document. The digest pairs the two files: a reader must never show a part
+ * of one pass with a part of another pass.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ProjectContext } from '@browsagent/shared';
@@ -20,6 +23,13 @@ interface ContextRecord {
   model: string;
   tokens: number;
   madeAt: string;
+  /** The SHA-256 digest of the markdown. It joins the record to the document. */
+  sha256: string;
+}
+
+/** The digest of one document. The record holds this value. */
+function digest(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 function recordOf(context: ProjectContext): ContextRecord {
@@ -28,15 +38,35 @@ function recordOf(context: ProjectContext): ContextRecord {
     model: context.model,
     tokens: context.tokens,
     madeAt: context.madeAt,
+    sha256: digest(context.markdown),
   };
+}
+
+/**
+ * Write one file through a temporary name.
+ *
+ * A reader sees the old file or the new file. The reader never sees a part of
+ * a file that a writer still holds.
+ */
+async function writeAtomic(path: string, text: string): Promise<void> {
+  const temp = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temp, text, 'utf8');
+  try {
+    await rename(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
 }
 
 /** Write the document and the record. Make the directory when it is absent. */
 export async function writeContext(root: string, context: ProjectContext): Promise<void> {
   const dir = join(root, CONTEXT_DIR);
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, MARKDOWN_FILE), context.markdown, 'utf8');
-  await writeFile(join(dir, RECORD_FILE), `${JSON.stringify(recordOf(context), null, 2)}\n`, 'utf8');
+  // Write the document first. The record holds its digest, so a reader that
+  // reads a mixed pair refuses the pair.
+  await writeAtomic(join(dir, MARKDOWN_FILE), context.markdown);
+  await writeAtomic(join(dir, RECORD_FILE), `${JSON.stringify(recordOf(context), null, 2)}\n`);
 }
 
 /** Read the document and the record. Return null when a file is absent or bad. */
@@ -60,10 +90,15 @@ export async function readContext(root: string): Promise<ProjectContext | null> 
   }
   if (typeof record !== 'object' || record === null) return null;
 
-  const { commit, model, tokens, madeAt } = record as Record<string, unknown>;
+  const { commit, model, tokens, madeAt, sha256 } = record as Record<string, unknown>;
   if (typeof commit !== 'string' || typeof model !== 'string') return null;
   if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return null;
   if (typeof madeAt !== 'string') return null;
+  // A record from an older version holds no digest. The check does not run for
+  // that record.
+  if (sha256 !== undefined) {
+    if (typeof sha256 !== 'string' || sha256 !== digest(markdown)) return null;
+  }
 
   return { markdown, commit, model, tokens, madeAt };
 }

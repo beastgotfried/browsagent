@@ -171,7 +171,9 @@ async function findApiCalls(root: string, entries: WalkEntry[]): Promise<ApiCall
     const text = await readSmall(join(root, entry.path));
     if (text === null) continue;
     text.split('\n').forEach((line, index) => {
-      if (/fetch\(|axios|\/api\//.test(line)) {
+      // The pattern names a call. A bare word can sit in a comment or in this
+      // file itself, and a comment is not a call.
+      if (/fetch\(|axios[.(]|\/api\//.test(line)) {
         calls.push({ path: entry.path, line: index + 1, text: line.trim() });
       }
     });

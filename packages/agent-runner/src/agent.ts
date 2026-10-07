@@ -104,7 +104,9 @@ export class ModelAgent implements Agent {
    * 1. Send the messages and the tools.
    * 2. Run each tool call and append the result as one tool message.
    * 3. Stop when the answer holds no tool call.
-   * The loop stops after MAX_TURNS in every other case.
+   * The loop reports a fault after MAX_TURNS in every other case. The model
+   * did not stop, and its last tool result never reached it. A cap is not a
+   * finished repair.
    */
   async edit(task: Task, cwd: string): Promise<string> {
     const messages = this.start(task, null);
@@ -126,6 +128,8 @@ export class ModelAgent implements Agent {
       }
     }
 
-    return text;
+    throw new Error(
+      `The model used all ${MAX_TURNS} turns and did not stop. The repair is not complete.`,
+    );
   }
 }

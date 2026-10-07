@@ -19,7 +19,13 @@ import { hasKey } from './config.js';
 const TIMEOUT_MS = 120_000;
 
 /** The class of a provider fault. The panel shows this value. */
-export type ProviderErrorCode = 'data-policy' | 'no-key' | 'no-credit' | 'provider';
+export type ProviderErrorCode =
+  | 'data-policy'
+  /** The provider refused a key that is set. This code is not 'no-key'. */
+  | 'key-refused'
+  | 'no-key'
+  | 'no-credit'
+  | 'provider';
 
 /** One fault from the provider or from the way to the provider. */
 export class ProviderError extends Error {
@@ -116,29 +122,34 @@ const MAX_WORDS = 500;
  * Remove a key that the provider or a proxy echoed in a fault body.
  *
  * The key must never leave this file. A fault body is not a trusted place: a
- * proxy can put the whole request, headers and all, into the answer.
+ * proxy can put the whole request, headers and all, into the answer. The
+ * function removes the configured key itself. Two common key shapes come out
+ * too, because another key or a part of one can be in the same body.
  */
-function scrubbed(text: string): string {
-  return text
+function scrubbed(text: string, key: string | null): string {
+  const shaped = text
     .replace(/Bearer\s+\S+/gi, 'Bearer <removed>')
     .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-<removed>');
+  // A value under four characters is no key. The replace would destroy the words.
+  if (key === null || key.length < 4) return shaped;
+  return shaped.split(key).join('<removed>');
 }
 
 /**
  * The words of the provider. Keep them, because they name the reason.
  * Cap them, because the body can be a whole HTML page.
  */
-function providerWords(body: unknown, raw: string): string {
+function providerWords(body: unknown, raw: string, key: string | null): string {
   if (typeof body === 'object' && body !== null) {
     const fault = (body as Record<string, unknown>)['error'];
     if (typeof fault === 'object' && fault !== null) {
       const message = (fault as Record<string, unknown>)['message'];
       if (typeof message === 'string' && message.trim() !== '') {
-        return scrubbed(message.trim()).slice(0, MAX_WORDS);
+        return scrubbed(message.trim(), key).slice(0, MAX_WORDS);
       }
     }
   }
-  const trimmed = scrubbed(raw.trim());
+  const trimmed = scrubbed(raw.trim(), key);
   if (trimmed === '') return 'no words';
   return trimmed.length > MAX_WORDS ? `${trimmed.slice(0, MAX_WORDS)}...` : trimmed;
 }
@@ -147,8 +158,14 @@ function providerWords(body: unknown, raw: string): string {
  * Name the fault. The status alone is not enough: the tested account answers a
  * guardrail refusal with HTTP 404, and the reason lives in the body.
  */
-function providerFault(status: number, body: unknown, raw: string, model: string): ProviderError {
-  const words = providerWords(body, raw);
+function providerFault(
+  status: number,
+  body: unknown,
+  raw: string,
+  model: string,
+  key: string | null,
+): ProviderError {
+  const words = providerWords(body, raw, key);
 
   if (/guardrail|data policy/i.test(`${raw} ${words}`)) {
     return new ProviderError(
@@ -161,7 +178,7 @@ function providerFault(status: number, body: unknown, raw: string, model: string
   }
   if (status === 401) {
     return new ProviderError(
-      'no-key',
+      'key-refused',
       `The provider refused the API key with HTTP 401. ` +
         `Set BROWSAGENT_API_KEY, or put the key in the config file. ` +
         `The provider said: ${words}`,
@@ -240,7 +257,9 @@ export class ModelClient implements ChatClient {
     }
 
     const parsed = parseJson(raw);
-    if (!response.ok) throw providerFault(response.status, parsed, raw, wanted);
+    if (!response.ok) {
+      throw providerFault(response.status, parsed, raw, wanted, this.config.apiKey);
+    }
     if (parsed === null) {
       throw new ProviderError('provider', `The provider answer is not JSON. The model is ${wanted}.`);
     }

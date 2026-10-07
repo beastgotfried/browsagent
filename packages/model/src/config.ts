@@ -1,5 +1,5 @@
 /**
- * config.ts — resolve the four provider values.
+ * config.ts — resolve the four provider values and the shared token.
  *
  * The companion holds the key. The key never goes to the browser.
  * The first source with a value wins for each field:
@@ -65,4 +65,18 @@ export async function loadProviderConfig(root: string): Promise<ProviderConfig> 
     model: fromEnv('BROWSAGENT_MODEL') ?? text(file['model']) ?? DEFAULT_MODEL,
     modelCheap: fromEnv('BROWSAGENT_MODEL_CHEAP') ?? text(file['modelCheap']) ?? DEFAULT_MODEL_CHEAP,
   };
+}
+
+/**
+ * Resolve the shared token of the companion.
+ *
+ * The token is not a provider value, but it lives in the same two places. The
+ * extension makes the token and shows it on the options page. The companion
+ * refuses a socket and a request that holds a different token. The environment
+ * wins over the project file. The answer is null when no source holds a token.
+ */
+export async function loadToken(root: string): Promise<string | null> {
+  const project = await readJson(join(root, '.browsagent', 'config.json'));
+  const file = isRecord(project) ? project : {};
+  return fromEnv('BROWSAGENT_TOKEN') ?? text(file['token']);
 }
