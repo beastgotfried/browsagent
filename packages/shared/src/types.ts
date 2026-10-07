@@ -264,6 +264,23 @@ export interface ProviderConfig {
   modelCheap: string;
 }
 
+export type ProviderStatus = 'no-key' | 'key-set' | 'key-bad';
+
+/**
+ * The provider state for the panel.
+ *
+ * This type has no field for the key. The key cannot reach the panel: there
+ * is nowhere to put it.
+ */
+export interface ProviderState {
+  status: ProviderStatus;
+  apiBase: string;
+  model: string;
+  modelCheap: string;
+  /** The last provider fault, in the words the provider used. Null when none. */
+  fault: string | null;
+}
+
 /** The project context. One model call makes this document at the project init. */
 export interface ProjectContext {
   markdown: string;
