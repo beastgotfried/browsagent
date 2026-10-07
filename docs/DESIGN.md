@@ -49,6 +49,22 @@ The companion reads the values from the environment, then
 Two model slots: `model` for the repair and `modelCheap` for the context pass.
 Do not spend the strong model on the summary.
 
+## D9. Accept applies the patch
+
+The agent shows a diff. The agent never lands a commit.
+
+The user accepts, and the tool applies the patch to the working tree with
+`git apply`. No commit and no branch are made. **The user commits with their
+own tooling.**
+
+## Out of scope for now
+
+The style finder is not built. The record holds no style rules, so the agent
+opens the stylesheet and finds the rule itself. This is slower and less exact.
+
+The loop is worth more than the precision. The style finder becomes a later
+quality step.
+
 ## Open questions
 
 1. Which injection method? The proxy, the extension, or the plugin.

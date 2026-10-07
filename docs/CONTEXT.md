@@ -90,14 +90,21 @@ derived data. It is made from the tree.
 The context names the commit it was made from. If `HEAD` has moved since then,
 the context is **stale**.
 
-The tool must say so. It must not use a stale context without a report. Three
-options for the user:
+The tool must say so. It must not use a stale context without a report.
 
-| Option | Result |
+**The context does not block a repair.** It is a guard, not a gate. A hard stop
+would block a repair for a commit that has nothing to do with it.
+
+The panel shows the state and one button:
+
+```
+context: stale (made at 8d1cdf4)     [ Make again ]
+```
+
+| The user does | The result |
 |---|---|
-| Keep | use the context. The tool records the risk |
-| Make again | one new model call |
-| Stop | no repair runs |
+| Nothing | the repair runs. The panel keeps the stale mark |
+| Presses Make again | one model call. The context is new |
 
 ## The prompt shape
 
