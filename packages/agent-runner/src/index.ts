@@ -197,5 +197,6 @@ export class AgentRunner {
   }
 }
 
+export { acceptDiff, worktreeDiff } from './accept.js';
 export { ModelAgent } from './agent.js';
 export { TOOLS, callTool } from './tools.js';
