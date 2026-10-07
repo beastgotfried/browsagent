@@ -17,7 +17,7 @@
  * Step 3 is the proof. Steps 1 and 2 give a clear answer for the two common
  * mistakes.
  */
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { ToolSpec } from '@browsagent/shared';
@@ -110,9 +110,42 @@ function inside(root: string, given: unknown): PathCheck {
   return { ok: true, full, shown: back === '' ? '.' : back };
 }
 
+/**
+ * Check the REAL path of one location.
+ *
+ * `inside` reads the parts of a path. It does not follow a symbolic link. So a
+ * link inside the worktree can still point outside it. Resolve the link and
+ * compare the real paths. A link that leaves the worktree is refused.
+ *
+ * A new file does not exist yet, so the resolve of the file itself fails. Then
+ * the parent directory is the thing to check.
+ */
+async function insideReal(root: string, check: PathCheck): Promise<PathCheck> {
+  if (!check.ok) return check;
+  try {
+    const base = await realpath(resolve(root));
+    const target = await realpath(check.full).catch(() => realpath(dirname(check.full)));
+    const back = relative(base, target);
+    if (back === '..' || back.startsWith(`..${sep}`) || isAbsolute(back)) {
+      return {
+        ok: false,
+        text: `The path ${check.shown} leaves the worktree through a symbolic link.`,
+      };
+    }
+  } catch {
+    return { ok: false, text: `The path ${check.shown} cannot be resolved.` };
+  }
+  return check;
+}
+
+/** Resolve one path and then check the real path. */
+async function safePath(root: string, given: unknown): Promise<PathCheck> {
+  return insideReal(root, inside(root, given));
+}
+
 /** List the names in one directory. One level. */
 async function listFiles(root: string, given: unknown): Promise<string> {
-  const path = inside(root, given);
+  const path = await safePath(root, given);
   if (!path.ok) return path.text;
 
   let entries;
@@ -142,7 +175,7 @@ async function listFiles(root: string, given: unknown): Promise<string> {
 
 /** Read one file and put a line number on each line. */
 async function readFileText(root: string, given: unknown): Promise<string> {
-  const path = inside(root, given);
+  const path = await safePath(root, given);
   if (!path.ok) return path.text;
 
   let info;
@@ -176,7 +209,7 @@ async function readFileText(root: string, given: unknown): Promise<string> {
 
 /** Write the whole file. Make a missing directory. */
 async function writeFileText(root: string, given: unknown, content: unknown): Promise<string> {
-  const path = inside(root, given);
+  const path = await safePath(root, given);
   if (!path.ok) return path.text;
   if (typeof content !== 'string') {
     return 'Give the content as a text value. The tool writes the whole file.';

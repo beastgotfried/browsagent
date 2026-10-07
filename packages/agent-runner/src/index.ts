@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { worktreeDiff } from './accept.js';
+
 import type { Evidence, Task, TaskState } from '@browsagent/shared';
 
 export interface CommandResult {
@@ -64,7 +66,12 @@ export interface Agent {
    * search the repo.
    */
   plan(task: Task, cwd: string): Promise<AgentPlan>;
-  /** Make the change. The agent returns a diff. */
+  /**
+   * Make the change. Return a SUMMARY of the change.
+   *
+   * The text is NOT the diff. It is often null. The runner measures the diff
+   * itself with `git diff`. Evidence is measured, never reported.
+   */
   edit(task: Task, cwd: string): Promise<string>;
 }
 
@@ -173,12 +180,22 @@ export class AgentRunner {
       do {
         // Count the attempt on the task. The task store holds this object.
         task.tries += 1;
-        diff = await this.agent.edit(task, cwd);
+        await this.agent.edit(task, cwd);
+        // The diff is evidence. Evidence is measured, never reported. The
+        // agent returns a summary, and that summary is often null. So the
+        // runner measures the diff itself, from the worktree.
+        diff = await worktreeDiff(cwd);
         check = await this.checkCode(cwd);
       } while (check.ran && !passed(check) && task.tries < maxTries);
     } catch {
-      // The agent threw a fault. Keep the last diff and report the failure.
       agentThrew = true;
+      try {
+        // A partial edit can still be in the worktree. Measure it, so the
+        // evidence shows what the agent really did before it failed.
+        diff = await worktreeDiff(cwd);
+      } catch {
+        // The worktree is gone or git failed. Keep the last measurement.
+      }
     }
 
     const evidence: Evidence = {

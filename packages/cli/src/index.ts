@@ -112,24 +112,37 @@ async function start(): Promise<void> {
   const onTask = async (task: Task): Promise<Task> => {
     try {
       const result = await runner.run(task);
-      // The runner should own this. The diff is evidence, so the runner must
-      // measure it with git diff. AgentRunner.run() trusts the agent text
-      // instead, and that text is often null. Move this call into agent-runner
-      // when that file is next open.
       const cwd = `${worktreeDir}/${task.id.slice(0, 8)}`;
-      const diff = await worktreeDiff(cwd);
+      // The runner measures the diff now. Measure it here a second time. The
+      // two measurements must agree. A difference means one of them is wrong,
+      // and the diff is the only evidence that the repair is correct.
+      const measured = await worktreeDiff(cwd);
+      if (result.diff !== measured) {
+        noteFault('the runner diff and the measured diff are different');
+      }
       return {
         ...task,
         state: result.state,
         plan: result.plan.text,
         files: result.plan.files,
-        diff,
-        evidence: { ...result.evidence, diff },
+        diff: measured,
+        evidence: { ...result.evidence, diff: measured },
         updatedAt: new Date().toISOString(),
       };
     } catch (error) {
       noteFault(error);
-      throw error;
+      // Return the task in the failed state. A throw here leaves the task in
+      // the queued state for ever, and the panel then shows a task that never
+      // moves. A failed task is never accepted, so its worktree goes away. A
+      // done task keeps its worktree, because the accept step needs it.
+      await runner.removeWorktree(task).catch(() => undefined);
+      return {
+        ...task,
+        state: 'failed',
+        diff: '',
+        evidence: { typecheckOk: false, lintOk: null, diff: '' },
+        updatedAt: new Date().toISOString(),
+      };
     }
   };
 

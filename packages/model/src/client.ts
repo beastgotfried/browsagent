@@ -109,17 +109,38 @@ function parseJson(text: string): unknown {
   }
 }
 
-/** The words of the provider. Keep them. They name the reason. */
+/** The most characters of a provider fault that an error message keeps. */
+const MAX_WORDS = 500;
+
+/**
+ * Remove a key that the provider or a proxy echoed in a fault body.
+ *
+ * The key must never leave this file. A fault body is not a trusted place: a
+ * proxy can put the whole request, headers and all, into the answer.
+ */
+function scrubbed(text: string): string {
+  return text
+    .replace(/Bearer\s+\S+/gi, 'Bearer <removed>')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-<removed>');
+}
+
+/**
+ * The words of the provider. Keep them, because they name the reason.
+ * Cap them, because the body can be a whole HTML page.
+ */
 function providerWords(body: unknown, raw: string): string {
   if (typeof body === 'object' && body !== null) {
     const fault = (body as Record<string, unknown>)['error'];
     if (typeof fault === 'object' && fault !== null) {
       const message = (fault as Record<string, unknown>)['message'];
-      if (typeof message === 'string' && message.trim() !== '') return message.trim();
+      if (typeof message === 'string' && message.trim() !== '') {
+        return scrubbed(message.trim()).slice(0, MAX_WORDS);
+      }
     }
   }
-  const trimmed = raw.trim();
-  return trimmed === '' ? 'no words' : trimmed;
+  const trimmed = scrubbed(raw.trim());
+  if (trimmed === '') return 'no words';
+  return trimmed.length > MAX_WORDS ? `${trimmed.slice(0, MAX_WORDS)}...` : trimmed;
 }
 
 /**
